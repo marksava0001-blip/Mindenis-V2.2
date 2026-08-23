@@ -19,15 +19,51 @@
   const SUPABASE_URL = (typeof window !== 'undefined' && window.DASH_SUPABASE_URL) || 'https://srajryooffirbroltjmg.supabase.co';
   const SUPABASE_KEY = (typeof window !== 'undefined' && window.DASH_SUPABASE_KEY) || 'sb_publishable_5142ZwTLF_DkSVRzciNuRA_bHwRAu4c';
 
+  // --- tiny visible sync-status badge (tap for detail) ------------------
+  // sync.js has no DOM dependency of its own, but this indicator does, so
+  // it waits for the DOM even though the rest of this file runs eagerly.
+  let badgeEl = null;
+  function ensureBadge() {
+    if (badgeEl || !document.body) return badgeEl;
+    badgeEl = document.createElement('div');
+    badgeEl.id = '__syncBadge';
+    badgeEl.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top,0px) + 6px);left:8px;' +
+      'z-index:9999;font:600 10.5px -apple-system,BlinkMacSystemFont,sans-serif;letter-spacing:0.02em;' +
+      'padding:5px 9px;border-radius:999px;background:rgba(20,20,22,0.75);color:#fff;cursor:pointer;' +
+      'backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.14);display:flex;align-items:center;gap:5px;';
+    badgeEl.innerHTML = '<span class="__syncDot" style="width:6px;height:6px;border-radius:50%;background:#F2C063;flex-shrink:0;"></span><span class="__syncText">syncing…</span>';
+    badgeEl.addEventListener('click', function () {
+      alert('Sync status (' + (badgeEl.dataset.appKey || '?') + '):\n\n' + (badgeEl.dataset.detail || 'no detail yet'));
+    });
+    document.body.appendChild(badgeEl);
+    return badgeEl;
+  }
+  function setBadge(appKey, state, detail) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () { setBadge(appKey, state, detail); });
+      return;
+    }
+    const el = ensureBadge();
+    if (!el) return;
+    el.dataset.appKey = appKey || '';
+    el.dataset.detail = detail || '';
+    const dot = el.querySelector('.__syncDot');
+    const text = el.querySelector('.__syncText');
+    if (state === 'ok') { dot.style.background = '#6BE3A4'; text.textContent = 'synced'; }
+    else if (state === 'error') { dot.style.background = '#FF6B6B'; text.textContent = 'sync error'; }
+    else { dot.style.background = '#F2C063'; text.textContent = 'syncing…'; }
+    if (detail) console.log('[sync:' + appKey + '] ' + state + ' — ' + detail);
+  }
+
   window.initCloudSync = function (config) {
     const appKey = config && config.appKey;
     const syncedKeys = (config && config.syncedKeys) || [];
     const syncedPrefixes = (config && config.syncedPrefixes) || [];
     const onApplied = config && config.onApplied;
     if (!appKey) return;
-    if (!window.supabase) return;
-    if (!SUPABASE_URL || !SUPABASE_KEY) return;
-    if (SUPABASE_URL.indexOf('PASTE-') === 0 || SUPABASE_KEY.indexOf('PASTE-') === 0) return;
+    if (!window.supabase) { setBadge(appKey, 'error', 'supabase-js failed to load (CDN blocked or offline)'); return; }
+    if (!SUPABASE_URL || !SUPABASE_KEY) { setBadge(appKey, 'error', 'missing Supabase URL/key config'); return; }
+    if (SUPABASE_URL.indexOf('PASTE-') === 0 || SUPABASE_KEY.indexOf('PASTE-') === 0) { setBadge(appKey, 'error', 'Supabase URL/key still set to placeholder'); return; }
 
     let supa = null;
     let pushTimer = null;
@@ -106,8 +142,9 @@
           { key: appKey, data: state, updated_at: new Date().toISOString() },
           { onConflict: 'key' }
         );
-        if (!error) lastSyncedJson = json;
-      } catch (e) {}
+        if (!error) { lastSyncedJson = json; setBadge(appKey, 'ok', 'last push ' + new Date().toLocaleTimeString()); }
+        else setBadge(appKey, 'error', 'push failed: ' + (error.message || JSON.stringify(error)));
+      } catch (e) { setBadge(appKey, 'error', 'push threw: ' + (e && e.message || String(e))); }
     }
     function schedulePush() {
       clearTimeout(pushTimer);
@@ -134,17 +171,25 @@
     }
 
     (async function init() {
+      setBadge(appKey, 'pending', 'connecting…');
       supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
       try {
         const { data, error } = await supa
           .from('app_state').select('data').eq('key', appKey).maybeSingle();
-        if (!error && data && data.data && Object.keys(data.data).length > 0) {
-          lastSyncedJson = JSON.stringify(data.data);
-          applyRemote(data.data);
-        } else if (Object.keys(collect()).length > 0) {
-          schedulePush();
+        if (error) {
+          setBadge(appKey, 'error', 'initial read failed: ' + (error.message || JSON.stringify(error)));
+        } else {
+          if (data && data.data && Object.keys(data.data).length > 0) {
+            lastSyncedJson = JSON.stringify(data.data);
+            applyRemote(data.data);
+          } else if (Object.keys(collect()).length > 0) {
+            schedulePush();
+          }
+          setBadge(appKey, 'ok', 'connected, initial read OK');
         }
-      } catch (e) {}
+      } catch (e) {
+        setBadge(appKey, 'error', 'initial read threw: ' + (e && e.message || String(e)));
+      }
       supa.channel('app_state_' + appKey)
         .on('postgres_changes', {
           event: '*',
@@ -158,7 +203,11 @@
           lastSyncedJson = incoming;
           applyRemote(payload.new.data);
         })
-        .subscribe();
+        .subscribe((status, err) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setBadge(appKey, 'error', 'realtime ' + status + (err ? ': ' + err.message : ''));
+          }
+        });
     })();
 
     window.addEventListener('beforeunload', flushOnUnload);

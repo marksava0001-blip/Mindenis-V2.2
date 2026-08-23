@@ -8,7 +8,8 @@
 //
 // Requires:
 //   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-//   <script src="sync.js" defer></script>
+//   <script src="sync.js"></script>  (NOT defer — must run before each page's
+//                                      own inline script calls initCloudSync)
 // =============================================================
 (function () {
   'use strict';

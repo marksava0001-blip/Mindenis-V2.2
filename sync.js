@@ -5,6 +5,10 @@
 //   syncedKeys     — exact localStorage keys to mirror
 //   syncedPrefixes — localStorage key prefixes to mirror (e.g. 'goals:')
 //   onApplied      — optional callback after remote state has been applied
+//   mergeFns       — optional { [localStorageKey]: (localRawJson, remoteRawJson) => mergedRawJson }
+//                     combine local + remote instead of remote replacing
+//                     local outright — use when two devices might create
+//                     data offline before their first successful sync
 //
 // Requires:
 //   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -60,6 +64,11 @@
     const syncedKeys = (config && config.syncedKeys) || [];
     const syncedPrefixes = (config && config.syncedPrefixes) || [];
     const onApplied = config && config.onApplied;
+    // Optional: { [localStorageKey]: (localRawJson, remoteRawJson) => mergedRawJson }
+    // Without this, a remote value always wins outright over local — fine for
+    // most pages, but risks silently discarding data two devices each created
+    // offline before ever syncing. Provide a merge fn to combine both instead.
+    const mergeFns = (config && config.mergeFns) || {};
     if (!appKey) return;
     if (!window.supabase) { setBadge(appKey, 'error', 'supabase-js failed to load (CDN blocked or offline)'); return; }
     if (!SUPABASE_URL || !SUPABASE_KEY) { setBadge(appKey, 'error', 'missing Supabase URL/key config'); return; }
@@ -111,11 +120,21 @@
       if (!remote || typeof remote !== 'object') return false;
       suppressSync = true;
       let changed = false;
+      let mergedBeyondRemote = false; // true if a merge pulled in local-only data
       try {
         for (const k of Object.keys(remote)) {
           if (!matches(k)) continue;
-          const incoming = JSON.stringify(remote[k]);
+          let incoming = JSON.stringify(remote[k]);
           const local = localStorage.getItem(k);
+          if (typeof mergeFns[k] === 'function' && local != null) {
+            try {
+              const merged = mergeFns[k](local, incoming);
+              if (typeof merged === 'string') {
+                if (merged !== incoming) mergedBeyondRemote = true;
+                incoming = merged;
+              }
+            } catch (e) {}
+          }
           if (local !== incoming) {
             try { origSet(k, incoming); changed = true; } catch (e) {}
           }
@@ -129,6 +148,9 @@
       if (changed && typeof onApplied === 'function') {
         try { onApplied(); } catch (e) {}
       }
+      // A merge combined local-only data into what the remote had — push
+      // the merged result back so the other device converges too.
+      if (mergedBeyondRemote) schedulePush();
       return changed;
     }
 
@@ -173,11 +195,12 @@
     // Pull the latest saved state and apply it. This is the core sync
     // mechanism — it does NOT depend on the realtime websocket, only on
     // plain REST, so it works even on networks that block websockets.
-    async function pullLatest(showBadgeOnError) {
+    async function pullLatest(showBadgeOnError, isRetry) {
       try {
         const { data, error } = await supa
           .from('app_state').select('data').eq('key', appKey).maybeSingle();
         if (error) {
+          if (!isRetry) { setTimeout(function () { pullLatest(showBadgeOnError, true); }, 3000); return; }
           if (showBadgeOnError) setBadge(appKey, 'error', 'read failed: ' + (error.message || JSON.stringify(error)));
           return;
         }
@@ -189,6 +212,9 @@
         }
         setBadge(appKey, 'ok', 'connected — last check ' + new Date().toLocaleTimeString());
       } catch (e) {
+        // TypeError: Failed to fetch is often a one-off blip — retry once
+        // before surfacing it, instead of leaving a stale error showing.
+        if (!isRetry) { setTimeout(function () { pullLatest(showBadgeOnError, true); }, 3000); return; }
         if (showBadgeOnError) setBadge(appKey, 'error', 'read threw: ' + (e && e.message || String(e)));
       }
     }

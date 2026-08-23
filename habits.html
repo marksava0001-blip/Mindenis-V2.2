@@ -376,6 +376,31 @@ body::after {
   function saveState(s) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
   let state = loadState();
 
+  // Two devices can each create habits offline before their first sync —
+  // union them (by id) instead of letting whichever device syncs last
+  // wipe out the other's habits. Completion logs are merged the same way
+  // (OR'd per day), so a day marked done on either device stays done.
+  function mergeHabitsState(localRaw, remoteRaw) {
+    let local, remote;
+    try { local = JSON.parse(localRaw); } catch (e) { local = null; }
+    try { remote = JSON.parse(remoteRaw); } catch (e) { remote = null; }
+    if (!local || !Array.isArray(local.habits)) return remoteRaw;
+    if (!remote || !Array.isArray(remote.habits)) return localRaw;
+
+    const byId = {};
+    remote.habits.forEach(function (h) { byId[h.id] = h; });
+    local.habits.forEach(function (h) { if (!byId[h.id]) byId[h.id] = h; });
+    const mergedHabits = Object.keys(byId).map(function (id) { return byId[id]; });
+
+    const mergedLog = {};
+    const allHabitIds = new Set(Object.keys(remote.log || {}).concat(Object.keys(local.log || {})));
+    allHabitIds.forEach(function (id) {
+      mergedLog[id] = Object.assign({}, (local.log || {})[id] || {}, (remote.log || {})[id] || {});
+    });
+
+    return JSON.stringify({ habits: mergedHabits, log: mergedLog });
+  }
+
   // --- helpers ---------------------------------------------------------
   function fmt(d) {
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
@@ -667,6 +692,7 @@ body::after {
     window.initCloudSync({
       appKey: 'habits',
       syncedKeys: [STORE_KEY],
+      mergeFns: { habits_v1: mergeHabitsState },
       onApplied: function () {
         state = loadState();
         renderList();

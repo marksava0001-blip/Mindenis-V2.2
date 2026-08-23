@@ -19,9 +19,11 @@
   'use strict';
 
   // Prefer Vercel env vars (served via /api/config → window.DASH_*),
-  // otherwise fall back to these defaults.
-  const SUPABASE_URL = (typeof window !== 'undefined' && window.DASH_SUPABASE_URL) || 'https://srajryooffirbroltjmg.supabase.co';
-  const SUPABASE_KEY = (typeof window !== 'undefined' && window.DASH_SUPABASE_KEY) || 'sb_publishable_5142ZwTLF_DkSVRzciNuRA_bHwRAu4c';
+  // otherwise fall back to these defaults. IMPORTANT: only ever put a
+  // public "publishable"/"anon" key here — never a secret/service_role
+  // key, since this file ships to every visitor's browser.
+  const SUPABASE_URL = (typeof window !== 'undefined' && window.DASH_SUPABASE_URL) || 'https://qasffxghajrshvmewlsh.supabase.co';
+  const SUPABASE_KEY = (typeof window !== 'undefined' && window.DASH_SUPABASE_KEY) || 'sb_publishable_0RYrT2vohICINJplFwKSug_Y00krcCw';
 
   // --- tiny visible sync-status badge (tap for detail) ------------------
   // sync.js has no DOM dependency of its own, but this indicator does, so

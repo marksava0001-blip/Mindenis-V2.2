@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="lock.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050506">
+<title>Habits · Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="sync.js" defer></script>
+<script src="topbar.js" defer></script>
+
+<style>
+:root {
+  --text-primary: #FAFAFA;
+  --text-secondary: #B8B6B0;
+  --text-tertiary: #76746E;
+  --success: #6BE3A4;
+  --warning: #F2C063;
+  --danger:  #FF6B6B;
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: #050506;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  min-height: 100vh; position: relative; overflow-x: hidden;
+  padding: max(28px, env(safe-area-inset-top)) 20px 60px;
+}
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background:
+    radial-gradient(circle at 82% 14%, rgba(224,118,88,0.16), transparent 45%),
+    radial-gradient(circle at 18% 90%, rgba(180,180,200,0.06), transparent 50%);
+  filter: blur(40px); pointer-events: none; z-index: -2;
+  animation: drift 36s ease-in-out infinite alternate;
+}
+body::after {
+  content: ''; position: fixed; inset: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.014) 1px, transparent 1px);
+  background-size: 3px 3px; pointer-events: none; z-index: -1;
+}
+@keyframes drift { 0%{transform:translate3d(0,0,0)} 100%{transform:translate3d(-22px,14px,0)} }
+
+.page { max-width: 1100px; margin: 0 auto; }
+.dash-title {
+  margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.025em;
+  background: linear-gradient(180deg, #FFFFFF 0%, #C7C4BC 120%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+@media (max-width: 480px) { .dash-title { font-size: 22px; } }
+
+.section { margin-top: 8px; }
+.section-title {
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--text-tertiary);
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 12px;
+}
+.section-title::before { content: ''; width: 18px; height: 1px; background: var(--text-tertiary); opacity: 0.6; }
+.section-title::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0.08), transparent); }
+
+.gm-card {
+  position: relative;
+  background: rgba(255,255,255,0.04);
+  border-radius: 16px; padding: 20px; margin-bottom: 14px;
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  overflow: hidden;
+}
+
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+.stat { background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 14px; }
+.stat-num { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; color: var(--text-primary); line-height: 1; }
+.stat-label { margin-top: 6px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); }
+
+.empty-state { text-align: center; font-size: 12px; font-style: italic; color: var(--text-tertiary); padding: 30px 0; }
+
+.gm-ghost {
+  padding: 11px 18px; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px;
+  background: rgba(255,255,255,0.04); color: var(--text-primary);
+  font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.gm-ghost:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.18); }
+
+/* ===== Header row ===== */
+.hub-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.icon-btn {
+  width: 42px; height: 42px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 12px; border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04); color: var(--text-secondary);
+  cursor: pointer; transition: background 0.15s, color 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.icon-btn:active { transform: scale(0.94); }
+
+/* ===== Habit cards ===== */
+.habit-card {
+  position: relative; cursor: pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px; padding: 18px; margin-bottom: 14px;
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  transition: border-color 0.15s;
+}
+.habit-card:hover { border-color: rgba(255,255,255,0.14); }
+.habit-top { display: flex; align-items: center; gap: 12px; }
+.habit-icon {
+  width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 20px;
+  background: var(--hcolor, #FF8FA3);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--hcolor, #FF8FA3) 45%, transparent);
+}
+.habit-info { flex: 1; min-width: 0; }
+.habit-name { font-size: 16px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
+.habit-desc { font-size: 12.5px; color: var(--text-tertiary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.habit-check {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  border: 1.5px solid rgba(255,255,255,0.18); background: rgba(0,0,0,0.28);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.25s;
+}
+.habit-check.on {
+  background: var(--hcolor, #FF8FA3); border-color: var(--hcolor, #FF8FA3);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--hcolor, #FF8FA3) 50%, transparent);
+}
+
+/* Mini contribution-style heatmap on each card */
+.heat-mini { display: grid; grid-template-columns: repeat(16, 1fr); grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; gap: 3px; height: 60px; margin-top: 14px; }
+.heat-cell { border-radius: 2px; background: rgba(255,255,255,0.06); }
+.heat-cell.heat-future { background: transparent; }
+.heat-cell.heat-pad { background: transparent; }
+
+/* ===== Full-screen slide-up sheets ===== */
+.wt-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: #050506; overflow-y: auto;
+  transform: translateY(100%);
+  transition: transform 0.32s cubic-bezier(0.32,0.72,0,1);
+  padding: max(20px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
+}
+.wt-overlay.is-open { transform: translateY(0); }
+#editView { z-index: 101; }
+.wt-overlay-inner { max-width: 640px; margin: 0 auto; }
+.wt-overlay-h { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+.wt-back {
+  width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-secondary); display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.wt-back:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.wt-overlay-title { flex: 1; min-width: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; color: var(--text-primary); }
+
+.detail-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; }
+.detail-icon { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.detail-name { font-size: 19px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
+.detail-type { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+
+/* Year heatmap + nav */
+.year-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 14px; font-family: var(--font-mono); font-weight: 700; font-size: 14px; color: var(--text-primary); }
+.year-nav-btn {
+  width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04); color: var(--text-secondary); cursor: pointer; font-size: 15px;
+}
+.year-nav-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.heat-year-wrap { overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+.heat-year-inner { width: max-content; }
+.heat-year-labels { display: grid; grid-auto-flow: column; grid-auto-columns: 10px; gap: 3px; margin-bottom: 5px; height: 11px; }
+.heat-month-label { font-size: 9px; font-weight: 600; color: var(--text-tertiary); white-space: nowrap; }
+.heat-year-grid { display: grid; grid-template-rows: repeat(7, 10px); grid-auto-flow: column; grid-auto-columns: 10px; gap: 3px; }
+
+/* Completions / Month chart */
+.month-chart { display: flex; align-items: flex-end; gap: 6px; height: 130px; }
+.month-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+.month-bar-wrap { width: 100%; flex: 1; display: flex; align-items: flex-end; }
+.month-bar { width: 100%; border-radius: 4px 4px 2px 2px; background: linear-gradient(180deg, var(--hcolor, #FF8FA3), color-mix(in srgb, var(--hcolor, #FF8FA3) 35%, transparent)); min-height: 2px; }
+.month-label { font-size: 9px; font-weight: 600; color: var(--text-tertiary); }
+
+/* Edit sheet fields */
+.field { margin-bottom: 14px; }
+.field-block { margin-bottom: 18px; }
+.field-label { font-size: 11px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 7px; display: block; }
+.set-input {
+  width: 100%; padding: 11px 13px; border: 1px solid rgba(255,255,255,0.08); border-radius: 11px;
+  background: rgba(0,0,0,0.3); color: var(--text-primary); font-family: inherit; font-size: 14px;
+  outline: none; transition: border-color 0.2s;
+}
+.set-input:focus { border-color: rgba(255,255,255,0.28); }
+
+.icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 10px; }
+.icon-opt {
+  width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center;
+  font-size: 19px; cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.icon-opt:active { transform: scale(0.94); }
+.icon-opt.sel {
+  border-color: var(--hcolor, #FF8FA3);
+  background: color-mix(in srgb, var(--hcolor, #FF8FA3) 22%, transparent);
+  box-shadow: 0 0 0 1px var(--hcolor, #FF8FA3);
+}
+
+.color-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.color-opt { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.1s; }
+.color-opt.sel { border-color: #fff; transform: scale(1.1); }
+
+.seg { display: inline-flex; border: 1px solid rgba(255,255,255,0.10); border-radius: 11px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--text-tertiary); font-family: inherit; font-size: 13px; font-weight: 600; padding: 11px 14px; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.seg button.on { background: rgba(255,255,255,0.12); color: var(--text-primary); }
+
+.btn-primary {
+  width: 100%; padding: 13px; border: none; border-radius: 12px;
+  background: linear-gradient(180deg,#ffffff 0%,#e8e5dd 100%); color: #0a0a0b;
+  font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), 0 4px 14px rgba(0,0,0,0.40);
+  margin-top: 6px; transition: filter 0.15s, transform 0.1s;
+}
+.btn-primary:hover { filter: brightness(1.05); }
+.btn-primary:active { transform: translateY(1px); }
+
+@media (max-width: 480px) {
+  body { padding: max(20px, env(safe-area-inset-top)) 14px 60px; }
+  .gm-card, .habit-card { padding: 16px; }
+  .stat-num { font-size: 22px; }
+  .wt-overlay { padding: max(20px, env(safe-area-inset-top)) 14px max(28px, env(safe-area-inset-bottom)); }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="hub-head">
+    <h1 class="dash-title">Habits</h1>
+    <button class="icon-btn" id="addHabitBtn" type="button" aria-label="Add habit">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
+
+  <div class="section">
+    <div id="habitList"></div>
+  </div>
+
+</div><!-- /.page -->
+
+<!-- ===== Habit detail (year heatmap + stats) ===== -->
+<div class="wt-overlay" id="detailView">
+  <div class="wt-overlay-inner">
+    <div class="wt-overlay-h">
+      <button class="wt-back" id="detailBack" type="button" aria-label="Back">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div class="detail-title-wrap">
+        <div class="detail-icon" id="detailIcon"></div>
+        <div>
+          <div class="detail-name" id="detailName"></div>
+          <div class="detail-type" id="detailType"></div>
+        </div>
+      </div>
+      <button class="wt-back" id="detailEditBtn" type="button" aria-label="Edit habit">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      </button>
+    </div>
+
+    <div class="section">
+      <div class="gm-card">
+        <div class="year-nav">
+          <button class="year-nav-btn" id="yearPrev" type="button" aria-label="Previous year">‹</button>
+          <span id="yearCur"></span>
+          <button class="year-nav-btn" id="yearNext" type="button" aria-label="Next year">›</button>
+        </div>
+        <div class="heat-year-wrap"><div class="heat-year-inner">
+          <div class="heat-year-labels" id="yearLabels"></div>
+          <div class="heat-year-grid" id="yearGrid"></div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Overview</div>
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-num" id="statCompletions">0</div><div class="stat-label">Completions</div></div>
+        <div class="stat"><div class="stat-num" id="statRate">0%</div><div class="stat-label">Completion Rate</div></div>
+        <div class="stat"><div class="stat-num" id="statCurrent">0</div><div class="stat-label">Current Streak</div></div>
+        <div class="stat"><div class="stat-num" id="statBest">0</div><div class="stat-label">Best Streak</div></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Completions / Month</div>
+      <div class="gm-card">
+        <div class="month-chart" id="monthChart"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Add / Edit Habit sheet ===== -->
+<div class="wt-overlay" id="editView">
+  <div class="wt-overlay-inner">
+    <div class="wt-overlay-h">
+      <button class="wt-back" id="editClose" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="wt-overlay-title" id="editHeading">Add Habit</div>
+    </div>
+
+    <div class="field-block">
+      <label class="field-label">Icon</label>
+      <div class="icon-grid" id="iconGrid"></div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Name</label>
+      <input class="set-input" id="editName" type="text" placeholder="e.g. Reading" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label class="field-label">Description</label>
+      <input class="set-input" id="editDesc" type="text" placeholder="e.g. Read every day for at least 15 minutes" autocomplete="off">
+    </div>
+
+    <div class="field-block">
+      <label class="field-label">Color</label>
+      <div class="color-grid" id="colorGrid"></div>
+    </div>
+
+    <div class="field-block">
+      <label class="field-label">Habit Type</label>
+      <div class="seg" id="typeSeg" style="width:100%; display:flex;">
+        <button type="button" data-t="build" style="flex:1;">Build a habit</button>
+        <button type="button" data-t="quit" style="flex:1;">Quit a habit</button>
+      </div>
+    </div>
+
+    <button class="btn-primary" id="editSave" type="button">Save</button>
+    <button class="gm-ghost" id="editDelete" type="button" style="width:100%; margin-top:10px; color:var(--danger); border-color:rgba(255,107,107,0.25); display:none;">Delete Habit</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const $ = function (id) { return document.getElementById(id); };
+
+  const STORE_KEY = 'habits_v1';
+  const ICONS = ['🏋️','💪','🏃','🚴','🧘','🏊','⚽','🚶','📖','✍️','🎸','🎨','🎹','🎵','📚','💻','💧','🥗','😴','🧠','💊','🦷','🧴','🌱','📵','🚭','🚫','⏰','🙏','🧹','💰','🎯'];
+  const COLORS = ['#6BE3A4','#7DD3FC','#A7F3D0','#60A5FA','#F2C063','#C9A36B','#A78BFA','#FF8FA3','#FF6B6B','#34D8C4'];
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // --- storage -------------------------------------------------------
+  function loadState() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(STORE_KEY));
+      if (raw && Array.isArray(raw.habits)) return { habits: raw.habits, log: raw.log || {} };
+    } catch (e) {}
+    return { habits: [], log: {} };
+  }
+  function saveState(s) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
+  let state = loadState();
+
+  // --- helpers ---------------------------------------------------------
+  function fmt(d) {
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + dd;
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function openSheet(id) { $(id).classList.add('is-open'); }
+  function closeSheet(id) { $(id).classList.remove('is-open'); }
+
+  function currentStreak(dateSet) {
+    let d = new Date(); d.setHours(0, 0, 0, 0);
+    if (!dateSet.has(fmt(d))) d.setDate(d.getDate() - 1);
+    let streak = 0;
+    while (dateSet.has(fmt(d))) { streak++; d.setDate(d.getDate() - 1); }
+    return streak;
+  }
+  function bestStreak(dates) {
+    if (dates.length === 0) return 0;
+    const sorted = dates.slice().sort();
+    let best = 1, cur = 1;
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = new Date(sorted[i - 1] + 'T00:00:00');
+      const d = new Date(sorted[i] + 'T00:00:00');
+      const diff = Math.round((d - prev) / 86400000);
+      cur = diff === 1 ? cur + 1 : 1;
+      if (cur > best) best = cur;
+    }
+    return best;
+  }
+
+  // --- heatmap builders --------------------------------------------------
+  function buildMiniHeat(dateSet, color, weeks) {
+    weeks = weeks || 16;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const end = new Date(today); end.setDate(today.getDate() + (6 - today.getDay()));
+    const start = new Date(end); start.setDate(end.getDate() - (weeks * 7 - 1));
+    let html = '';
+    for (let col = 0; col < weeks; col++) {
+      for (let row = 0; row < 7; row++) {
+        const d = new Date(start); d.setDate(start.getDate() + col * 7 + row);
+        const future = d > today;
+        const done = !future && dateSet.has(fmt(d));
+        const cls = 'heat-cell' + (future ? ' heat-future' : '') + (done ? ' heat-on' : '');
+        const style = done ? ' style="background:' + color + '"' : '';
+        html += '<div class="' + cls + '"' + style + '></div>';
+      }
+    }
+    return html;
+  }
+
+  function buildYearHeat(dateSet, color, year) {
+    const jan1 = new Date(year, 0, 1);
+    const dec31 = new Date(year, 11, 31);
+    const start = new Date(jan1); start.setDate(jan1.getDate() - jan1.getDay());
+    const end = new Date(dec31); end.setDate(dec31.getDate() + (6 - dec31.getDay()));
+    const totalDays = Math.round((end - start) / 86400000) + 1;
+    const weeks = Math.round(totalDays / 7);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let cellsHtml = '', labelsHtml = '';
+    for (let col = 0; col < weeks; col++) {
+      let monthLabel = '';
+      for (let row = 0; row < 7; row++) {
+        const d = new Date(start); d.setDate(start.getDate() + col * 7 + row);
+        const inYear = d.getFullYear() === year;
+        const future = d > today;
+        const done = inYear && !future && dateSet.has(fmt(d));
+        let cls = 'heat-cell';
+        if (!inYear) cls += ' heat-pad';
+        else if (future) cls += ' heat-future';
+        if (done) cls += ' heat-on';
+        const style = done ? ' style="background:' + color + '"' : '';
+        cellsHtml += '<div class="' + cls + '"' + style + ' title="' + (inYear ? fmt(d) : '') + '"></div>';
+        if (inYear && d.getDate() === 1 && !monthLabel) monthLabel = MONTH_NAMES[d.getMonth()];
+      }
+      labelsHtml += '<div class="heat-month-label">' + monthLabel + '</div>';
+    }
+    return { cellsHtml: cellsHtml, labelsHtml: labelsHtml };
+  }
+
+  function renderMonthChart(dates, year, color) {
+    const counts = new Array(12).fill(0);
+    dates.forEach(function (ds) {
+      const d = new Date(ds + 'T00:00:00');
+      if (d.getFullYear() === year) counts[d.getMonth()]++;
+    });
+    const max = Math.max(1, Math.max.apply(null, counts));
+    const el = $('monthChart');
+    el.style.setProperty('--hcolor', color);
+    el.innerHTML = counts.map(function (c, i) {
+      const h = Math.max(2, Math.round((c / max) * 100));
+      return '<div class="month-col"><div class="month-bar-wrap"><div class="month-bar" style="height:' + h + '%" title="' + c + '"></div></div><div class="month-label">' + MONTH_NAMES[i][0] + '</div></div>';
+    }).join('');
+  }
+
+  // --- list view -------------------------------------------------------
+  function renderList() {
+    const wrap = $('habitList');
+    if (state.habits.length === 0) {
+      wrap.innerHTML = '<div class="empty-state">No habits yet — tap + to add your first one.</div>';
+      return;
+    }
+    const today = fmt(new Date());
+    wrap.innerHTML = '';
+    state.habits.forEach(function (h) {
+      const log = state.log[h.id] || {};
+      const dateSet = new Set(Object.keys(log));
+      const doneToday = !!log[today];
+      const card = document.createElement('div');
+      card.className = 'habit-card';
+      card.style.setProperty('--hcolor', h.color);
+      card.innerHTML =
+        '<div class="habit-top">' +
+          '<div class="habit-icon">' + h.icon + '</div>' +
+          '<div class="habit-info">' +
+            '<div class="habit-name">' + escapeHtml(h.name) + '</div>' +
+            '<div class="habit-desc">' + escapeHtml(h.description || '') + '</div>' +
+          '</div>' +
+          '<button class="habit-check' + (doneToday ? ' on' : '') + '" type="button" aria-label="Mark done today">' +
+            (doneToday ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#0A0A0B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
+          '</button>' +
+        '</div>' +
+        '<div class="heat-mini">' + buildMiniHeat(dateSet, h.color) + '</div>';
+      card.querySelector('.habit-check').addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleToday(h.id);
+      });
+      card.addEventListener('click', function () { openDetail(h.id); });
+      wrap.appendChild(card);
+    });
+  }
+
+  function toggleToday(id) {
+    const today = fmt(new Date());
+    state.log[id] = state.log[id] || {};
+    if (state.log[id][today]) delete state.log[id][today];
+    else state.log[id][today] = true;
+    saveState(state);
+    renderList();
+    if (currentHabitId === id) renderDetail();
+  }
+
+  // --- detail view -------------------------------------------------------
+  let currentHabitId = null;
+  let currentYear = new Date().getFullYear();
+
+  function openDetail(id) {
+    currentHabitId = id;
+    currentYear = new Date().getFullYear();
+    renderDetail();
+    openSheet('detailView');
+  }
+
+  function renderDetail() {
+    const h = state.habits.find(function (x) { return x.id === currentHabitId; });
+    if (!h) return;
+    const log = state.log[h.id] || {};
+    const dates = Object.keys(log);
+    const dateSet = new Set(dates);
+
+    $('detailIcon').textContent = h.icon;
+    $('detailIcon').style.background = h.color;
+    $('detailName').textContent = h.name;
+    $('detailType').textContent = h.type === 'quit' ? '🚫 Quit a habit' : '🔁 Build a habit';
+    $('yearCur').textContent = currentYear;
+
+    const yh = buildYearHeat(dateSet, h.color, currentYear);
+    $('yearGrid').innerHTML = yh.cellsHtml;
+    $('yearLabels').innerHTML = yh.labelsHtml;
+
+    const completions = dates.length;
+    const created = new Date(h.createdAt + 'T00:00:00');
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const daysSince = Math.max(1, Math.round((today - created) / 86400000) + 1);
+    const rate = Math.min(100, Math.round((completions / daysSince) * 100));
+
+    $('statCompletions').textContent = completions;
+    $('statRate').textContent = rate + '%';
+    $('statCurrent').textContent = currentStreak(dateSet);
+    $('statBest').textContent = bestStreak(dates);
+
+    renderMonthChart(dates, currentYear, h.color);
+  }
+
+  $('detailBack').addEventListener('click', function () { closeSheet('detailView'); });
+  $('detailEditBtn').addEventListener('click', function () {
+    const h = state.habits.find(function (x) { return x.id === currentHabitId; });
+    if (h) openEditEditor(h);
+  });
+  $('yearPrev').addEventListener('click', function () { currentYear--; renderDetail(); });
+  $('yearNext').addEventListener('click', function () { currentYear++; renderDetail(); });
+
+  // --- add / edit sheet -------------------------------------------------------
+  let editingId = null;
+  let editIcon = ICONS[0], editColorVal = COLORS[0], editType = 'build';
+
+  function populateEditor() {
+    $('iconGrid').innerHTML = ICONS.map(function (ic) {
+      return '<button type="button" class="icon-opt' + (ic === editIcon ? ' sel' : '') + '" data-icon="' + ic + '">' + ic + '</button>';
+    }).join('');
+    $('iconGrid').style.setProperty('--hcolor', editColorVal);
+    $('iconGrid').querySelectorAll('.icon-opt').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        editIcon = btn.dataset.icon;
+        $('iconGrid').querySelectorAll('.icon-opt').forEach(function (b) { b.classList.toggle('sel', b === btn); });
+      });
+    });
+
+    $('colorGrid').innerHTML = COLORS.map(function (c) {
+      return '<button type="button" class="color-opt' + (c === editColorVal ? ' sel' : '') + '" data-color="' + c + '" style="background:' + c + '"></button>';
+    }).join('');
+    $('colorGrid').querySelectorAll('.color-opt').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        editColorVal = btn.dataset.color;
+        $('colorGrid').querySelectorAll('.color-opt').forEach(function (b) { b.classList.toggle('sel', b === btn); });
+        $('iconGrid').style.setProperty('--hcolor', editColorVal);
+      });
+    });
+
+    $('typeSeg').querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.t === editType);
+      b.onclick = function () {
+        editType = b.dataset.t;
+        $('typeSeg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      };
+    });
+  }
+
+  function openAddEditor() {
+    editingId = null;
+    $('editHeading').textContent = 'Add Habit';
+    $('editDelete').style.display = 'none';
+    editIcon = ICONS[0]; editColorVal = COLORS[0]; editType = 'build';
+    $('editName').value = ''; $('editDesc').value = '';
+    populateEditor();
+    openSheet('editView');
+  }
+  function openEditEditor(h) {
+    editingId = h.id;
+    $('editHeading').textContent = 'Edit Habit';
+    $('editDelete').style.display = '';
+    editIcon = h.icon; editColorVal = h.color; editType = h.type;
+    $('editName').value = h.name; $('editDesc').value = h.description || '';
+    populateEditor();
+    openSheet('editView');
+  }
+
+  $('addHabitBtn').addEventListener('click', openAddEditor);
+  $('editClose').addEventListener('click', function () { closeSheet('editView'); });
+
+  $('editSave').addEventListener('click', function () {
+    const name = $('editName').value.trim();
+    if (!name) { $('editName').focus(); return; }
+    const desc = $('editDesc').value.trim();
+    if (editingId) {
+      const h = state.habits.find(function (x) { return x.id === editingId; });
+      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType });
+    } else {
+      state.habits.push({
+        id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        name: name, description: desc, icon: editIcon, color: editColorVal, type: editType,
+        createdAt: fmt(new Date())
+      });
+    }
+    saveState(state);
+    closeSheet('editView');
+    renderList();
+    if (currentHabitId && currentHabitId === editingId) renderDetail();
+  });
+
+  $('editDelete').addEventListener('click', function () {
+    if (!editingId) return;
+    if (!confirm('Delete this habit? This cannot be undone.')) return;
+    state.habits = state.habits.filter(function (h) { return h.id !== editingId; });
+    delete state.log[editingId];
+    saveState(state);
+    closeSheet('editView');
+    closeSheet('detailView');
+    renderList();
+  });
+
+  renderList();
+
+  // --- cloud sync -------------------------------------------------------
+  if (window.initCloudSync) {
+    window.initCloudSync({
+      appKey: 'habits',
+      syncedKeys: [STORE_KEY],
+      onApplied: function () {
+        state = loadState();
+        renderList();
+        if (currentHabitId) renderDetail();
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

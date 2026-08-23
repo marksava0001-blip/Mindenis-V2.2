@@ -170,26 +170,37 @@
       } catch (e) {}
     }
 
-    (async function init() {
-      setBadge(appKey, 'pending', 'connecting…');
-      supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    // Pull the latest saved state and apply it. This is the core sync
+    // mechanism — it does NOT depend on the realtime websocket, only on
+    // plain REST, so it works even on networks that block websockets.
+    async function pullLatest(showBadgeOnError) {
       try {
         const { data, error } = await supa
           .from('app_state').select('data').eq('key', appKey).maybeSingle();
         if (error) {
-          setBadge(appKey, 'error', 'initial read failed: ' + (error.message || JSON.stringify(error)));
-        } else {
-          if (data && data.data && Object.keys(data.data).length > 0) {
-            lastSyncedJson = JSON.stringify(data.data);
-            applyRemote(data.data);
-          } else if (Object.keys(collect()).length > 0) {
-            schedulePush();
-          }
-          setBadge(appKey, 'ok', 'connected, initial read OK');
+          if (showBadgeOnError) setBadge(appKey, 'error', 'read failed: ' + (error.message || JSON.stringify(error)));
+          return;
         }
+        if (data && data.data && Object.keys(data.data).length > 0) {
+          const incoming = JSON.stringify(data.data);
+          if (incoming !== lastSyncedJson) { lastSyncedJson = incoming; applyRemote(data.data); }
+        } else if (Object.keys(collect()).length > 0) {
+          schedulePush();
+        }
+        setBadge(appKey, 'ok', 'connected — last check ' + new Date().toLocaleTimeString());
       } catch (e) {
-        setBadge(appKey, 'error', 'initial read threw: ' + (e && e.message || String(e)));
+        if (showBadgeOnError) setBadge(appKey, 'error', 'read threw: ' + (e && e.message || String(e)));
       }
+    }
+
+    (async function init() {
+      setBadge(appKey, 'pending', 'connecting…');
+      supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      await pullLatest(true);
+
+      // Best-effort live updates while the page stays open. If this fails
+      // (some networks block websockets) we still have the polling +
+      // refresh-on-reopen fallback below, so don't flag it as a hard error.
       supa.channel('app_state_' + appKey)
         .on('postgres_changes', {
           event: '*',
@@ -205,9 +216,18 @@
         })
         .subscribe((status, err) => {
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            setBadge(appKey, 'error', 'realtime ' + status + (err ? ': ' + err.message : ''));
+            console.log('[sync:' + appKey + '] realtime unavailable (' + status + '), relying on polling instead' + (err ? ': ' + err.message : ''));
           }
         });
+
+      // Fallback sync: re-pull periodically and whenever the page/tab
+      // becomes visible or focused again — covers the "open on the other
+      // device" case even when realtime can't connect.
+      setInterval(function () { pullLatest(false); }, 20000);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') pullLatest(false);
+      });
+      window.addEventListener('focus', function () { pullLatest(false); });
     })();
 
     window.addEventListener('beforeunload', flushOnUnload);

@@ -106,9 +106,61 @@ console.anthropic.com.
 
 ---
 
+## 5. Habit reminders (optional) — real push notifications
+
+Habits can send you an actual phone notification at a time you set, even when the app isn't
+open. This needs three things: a Supabase table, some Vercel env vars, and a free scheduler
+(GitHub Actions, already wired up in `.github/workflows/habit-reminders.yml`) that pings the
+app every 5 minutes to check what's due.
+
+### SQL #3 — push subscriptions + a dedupe log
+```sql
+create table if not exists public.push_subscriptions (
+  endpoint     text primary key,
+  subscription jsonb not null,
+  created_at   timestamptz not null default now()
+);
+alter table public.push_subscriptions enable row level security;
+create policy "anon full access push_subscriptions"
+  on public.push_subscriptions for all
+  to anon using (true) with check (true);
+
+create table if not exists public.reminder_log (
+  habit_id text not null,
+  date     text not null,
+  sent_at  timestamptz not null default now(),
+  primary key (habit_id, date)
+);
+alter table public.reminder_log enable row level security;
+create policy "anon full access reminder_log"
+  on public.reminder_log for all
+  to anon using (true) with check (true);
+```
+
+### Vercel env vars
+Generate a VAPID key pair once with `npx web-push generate-vapid-keys`, then add in Vercel →
+**Settings → Environment Variables**:
+
+| Variable | Value |
+|---|---|
+| `VAPID_PUBLIC_KEY` | the public key |
+| `VAPID_PRIVATE_KEY` | the private key (**secret**) |
+| `VAPID_SUBJECT` | a `mailto:` address or `https://` URL identifying the app |
+| `CRON_SECRET` | any random string — also add it as a GitHub Actions repo secret of the same name (**Settings → Secrets and variables → Actions**), since the workflow sends it as a bearer token to prove the request is really the scheduler |
+
+Redeploy after adding these.
+
+### On your phone (iOS)
+Web push on iPhone only works for a site **added to the Home Screen** (Share → Add to Home
+Screen), iOS 16.4+. Open the installed icon (not the Safari tab), go to a habit → Edit → turn
+Reminders **On** → tap **Enable notifications**.
+
+---
+
 ## TL;DR
 1. Fork → import to Vercel → deploy.
 2. New Supabase → run the **SQL** above → paste your **URL + anon key** into `sync.js`,
    `topbar.js`, `gym.html`.
 3. (Optional) WHOOP: Client ID in `health.html` + the two env vars in Vercel.
-4. Change the password in `lock.js`. Done.
+4. (Optional) Habit reminders: SQL #3 + the four env vars above + Add to Home Screen on iOS.
+5. Change the password in `lock.js`. Done.

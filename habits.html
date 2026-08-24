@@ -6,6 +6,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#050506">
+<link rel="manifest" href="/manifest.json">
 <title>Habits · Dashboard</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -96,6 +97,14 @@ body::after {
   transition: background 0.15s, border-color 0.15s;
 }
 .gm-ghost:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.18); }
+
+.reminder-time-input { color-scheme: dark; width: 100%; }
+.reminder-hint { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; margin-top: 8px; }
+.reminder-hint a, .reminder-hint button.link {
+  background: none; border: none; padding: 0; font: inherit;
+  color: #7DD3FC; cursor: pointer; text-decoration: underline;
+}
+.reminder-hint.warn { color: #F2C063; }
 
 /* ===== Header row ===== */
 .hub-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
@@ -351,6 +360,16 @@ body::after {
     </div>
 
     <div class="field-block">
+      <label class="field-label">Reminders</label>
+      <div class="seg" id="reminderSeg" style="width:100%; display:flex;">
+        <button type="button" data-r="off" style="flex:1;">Off</button>
+        <button type="button" data-r="on" style="flex:1;">On</button>
+      </div>
+      <input type="time" class="set-input reminder-time-input" id="reminderTime" style="margin-top:10px; display:none;">
+      <div class="reminder-hint" id="reminderHint" style="display:none;"></div>
+    </div>
+
+    <div class="field-block">
       <label class="field-label">Habit Type</label>
       <div class="seg" id="typeSeg" style="width:100%; display:flex;">
         <button type="button" data-t="build" style="flex:1;">Build a habit</button>
@@ -379,7 +398,7 @@ body::after {
     try {
       const raw = JSON.parse(localStorage.getItem(STORE_KEY));
       if (raw && Array.isArray(raw.habits)) {
-        return { habits: raw.habits, log: raw.log || {}, deletedIds: (raw.deletedIds && typeof raw.deletedIds === 'object') ? raw.deletedIds : {} };
+        return { habits: raw.habits, log: raw.log || {}, deletedIds: (raw.deletedIds && typeof raw.deletedIds === 'object') ? raw.deletedIds : {}, timezone: raw.timezone || undefined };
       }
     } catch (e) {}
     return { habits: [], log: {}, deletedIds: {} };
@@ -404,9 +423,18 @@ body::after {
     // device/remote last pushed.
     const mergedDeletedIds = Object.assign({}, remote.deletedIds || {}, local.deletedIds || {});
 
+    // For an id present on both sides, keep whichever copy was edited more
+    // recently instead of always favoring remote — otherwise an edit made
+    // locally (e.g. changing a reminder time) can be silently discarded by
+    // a sync pull that races in before the edit's own push completes.
     const byId = {};
-    remote.habits.forEach(function (h) { byId[h.id] = h; });
-    local.habits.forEach(function (h) { if (!byId[h.id]) byId[h.id] = h; });
+    function considerHabit(h) {
+      if (!h) return;
+      const existing = byId[h.id];
+      if (!existing || (h.updatedAt || 0) >= (existing.updatedAt || 0)) byId[h.id] = h;
+    }
+    remote.habits.forEach(considerHabit);
+    local.habits.forEach(considerHabit);
     const mergedHabits = Object.keys(byId)
       .filter(function (id) { return !mergedDeletedIds[id]; })
       .map(function (id) { return byId[id]; });
@@ -418,7 +446,7 @@ body::after {
       mergedLog[id] = Object.assign({}, (local.log || {})[id] || {}, (remote.log || {})[id] || {});
     });
 
-    return JSON.stringify({ habits: mergedHabits, log: mergedLog, deletedIds: mergedDeletedIds });
+    return JSON.stringify({ habits: mergedHabits, log: mergedLog, deletedIds: mergedDeletedIds, timezone: local.timezone || remote.timezone });
   }
 
   // --- helpers ---------------------------------------------------------
@@ -635,9 +663,107 @@ body::after {
   $('yearPrev').addEventListener('click', function () { currentYear--; renderDetail(); });
   $('yearNext').addEventListener('click', function () { currentYear++; renderDetail(); });
 
+  // --- push notifications (habit reminders) ------------------------------
+  // Record this device's timezone so the server (which has no timezone of
+  // its own) can tell when "now" matches a habit's reminder time.
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && state.timezone !== tz) { state.timezone = tz; saveState(state); }
+  } catch (e) {}
+
+  const VAPID_PUBLIC_KEY = window.DASH_VAPID_PUBLIC_KEY || '';
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const out = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) out[i] = rawData.charCodeAt(i);
+    return out;
+  }
+  function pushSupportStatus() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+    if (!VAPID_PUBLIC_KEY) return 'unconfigured';
+    return Notification.permission; // 'default' | 'granted' | 'denied'
+  }
+
+  let pushSupabase = null;
+  function getPushSupabase() {
+    if (pushSupabase) return pushSupabase;
+    if (!window.supabase) return null;
+    const url = window.DASH_SUPABASE_URL || 'https://qasffxghajrshvmewlsh.supabase.co';
+    const key = window.DASH_SUPABASE_KEY || 'sb_publishable_0RYrT2vohICINJplFwKSug_Y00krcCw';
+    pushSupabase = window.supabase.createClient(url, key);
+    return pushSupabase;
+  }
+  async function saveSubscription(sub) {
+    const supa = getPushSupabase();
+    if (!supa) return;
+    const json = sub.toJSON();
+    try {
+      await supa.from('push_subscriptions').upsert(
+        { endpoint: json.endpoint, subscription: json },
+        { onConflict: 'endpoint' }
+      );
+    } catch (e) {}
+  }
+  async function ensurePushSubscription() {
+    if (!('serviceWorker' in navigator) || !VAPID_PUBLIC_KEY) return null;
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    await saveSubscription(sub);
+    return sub;
+  }
+  async function requestPushPermission() {
+    if (!('Notification' in window)) return 'unsupported';
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') { try { await ensurePushSubscription(); } catch (e) {} }
+    renderReminderHint();
+    return perm;
+  }
+  // Keep an already-granted subscription fresh — push subscriptions can
+  // silently expire and need re-registering.
+  if (('Notification' in window) && Notification.permission === 'granted') {
+    ensurePushSubscription().catch(function () {});
+  }
+
+  function renderReminderHint() {
+    const hint = $('reminderHint');
+    if (!editReminderEnabled) { hint.style.display = 'none'; hint.innerHTML = ''; return; }
+    hint.style.display = '';
+    hint.classList.remove('warn');
+    const status = pushSupportStatus();
+    if (status === 'unsupported') {
+      hint.classList.add('warn');
+      hint.textContent = 'Add this app to your Home Screen first (Share → Add to Home Screen), then open it from there to enable notifications.';
+    } else if (status === 'unconfigured') {
+      hint.classList.add('warn');
+      hint.textContent = "Push notifications aren't set up on the server yet.";
+    } else if (status === 'denied') {
+      hint.classList.add('warn');
+      hint.textContent = 'Notifications are blocked for this site — enable them in your browser/phone settings.';
+    } else if (status === 'granted') {
+      hint.textContent = 'Notifications are on for this device.';
+    } else {
+      hint.innerHTML = '';
+      hint.appendChild(document.createTextNode('Tap to allow reminders: '));
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'link'; btn.textContent = 'Enable notifications';
+      btn.onclick = function (e) { e.preventDefault(); requestPushPermission(); };
+      hint.appendChild(btn);
+    }
+  }
+
   // --- add / edit sheet -------------------------------------------------------
   let editingId = null;
   let editIcon = ICONS[0], editColorVal = COLORS[0], editType = 'build', editTimeOfDay = 'morning';
+  let editReminderEnabled = false, editReminderTime = '09:00';
 
   function populateEditor() {
     $('iconGrid').innerHTML = ICONS.map(function (ic) {
@@ -677,6 +803,21 @@ body::after {
         $('timeSeg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
       };
     });
+
+    $('reminderSeg').querySelectorAll('button').forEach(function (b) {
+      const isOn = b.dataset.r === 'on';
+      b.classList.toggle('on', isOn === editReminderEnabled);
+      b.onclick = function () {
+        editReminderEnabled = isOn;
+        $('reminderSeg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+        $('reminderTime').style.display = editReminderEnabled ? '' : 'none';
+        renderReminderHint();
+      };
+    });
+    $('reminderTime').value = editReminderTime;
+    $('reminderTime').style.display = editReminderEnabled ? '' : 'none';
+    $('reminderTime').oninput = function () { editReminderTime = $('reminderTime').value || '09:00'; };
+    renderReminderHint();
   }
 
   function openAddEditor() {
@@ -684,6 +825,7 @@ body::after {
     $('editHeading').textContent = 'Add Habit';
     $('editDelete').style.display = 'none';
     editIcon = ICONS[0]; editColorVal = COLORS[0]; editType = 'build'; editTimeOfDay = 'morning';
+    editReminderEnabled = false; editReminderTime = '09:00';
     $('editName').value = ''; $('editDesc').value = '';
     populateEditor();
     openSheet('editView');
@@ -693,6 +835,7 @@ body::after {
     $('editHeading').textContent = 'Edit Habit';
     $('editDelete').style.display = '';
     editIcon = h.icon; editColorVal = h.color; editType = h.type; editTimeOfDay = h.timeOfDay || 'morning';
+    editReminderEnabled = !!h.reminderEnabled; editReminderTime = h.reminderTime || '09:00';
     $('editName').value = h.name; $('editDesc').value = h.description || '';
     populateEditor();
     openSheet('editView');
@@ -707,12 +850,13 @@ body::after {
     const desc = $('editDesc').value.trim();
     if (editingId) {
       const h = state.habits.find(function (x) { return x.id === editingId; });
-      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay });
+      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay, reminderEnabled: editReminderEnabled, reminderTime: editReminderTime, updatedAt: Date.now() });
     } else {
       state.habits.push({
         id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay,
-        createdAt: fmt(new Date())
+        reminderEnabled: editReminderEnabled, reminderTime: editReminderTime,
+        createdAt: fmt(new Date()), updatedAt: Date.now()
       });
     }
     saveState(state);

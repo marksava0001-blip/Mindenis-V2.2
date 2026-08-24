@@ -46,6 +46,44 @@ function timeToMinutes(hhmm) {
   if (!m) return null;
   return Number(m[1]) * 60 + Number(m[2]);
 }
+function weekdayInTz(tz) {
+  try {
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(new Date());
+    const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[wd] != null ? map[wd] : new Date().getUTCDay();
+  } catch (e) {
+    return new Date().getUTCDay();
+  }
+}
+// "Today minus N days" as a Y-M-D string, computed from the tz-local
+// calendar date (not raw UTC-minus-N, which can land on the wrong day
+// near midnight in timezones far from UTC).
+function dateKeyDaysAgoInTz(tz, daysAgo) {
+  const [y, m, d] = todayInTz(tz).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  dt.setUTCDate(dt.getUTCDate() - daysAgo);
+  return dt.toISOString().slice(0, 10);
+}
+function countDoneInWindow(log, tz, habitId, periodDays) {
+  const l = log[habitId] || {};
+  let count = 0;
+  for (let i = 0; i < periodDays; i++) {
+    if (l[dateKeyDaysAgoInTz(tz, i)]) count++;
+  }
+  return count;
+}
+function isDueBySchedule(h, tz, log) {
+  const sch = h.schedule || { type: 'daily' };
+  if (sch.type === 'days') {
+    return Array.isArray(sch.days) && sch.days.indexOf(weekdayInTz(tz)) !== -1;
+  }
+  if (sch.type === 'frequency') {
+    const times = sch.timesPerPeriod || 1;
+    const period = sch.periodDays || 7;
+    return countDoneInWindow(log, tz, h.id, period) < times;
+  }
+  return true;
+}
 
 async function supaFetch(url, key, path, options) {
   const r = await fetch(url + '/rest/v1/' + path, {
@@ -100,6 +138,7 @@ export default async function handler(req, res) {
       if (!h.reminderEnabled || !h.reminderTime) return false;
       const doneToday = !!(log[h.id] && log[h.id][today]);
       if (doneToday) return false;
+      if (!isDueBySchedule(h, tz, log)) return false;
       const reminderMin = timeToMinutes(h.reminderTime);
       if (reminderMin == null) return false;
       const delta = nowMin - reminderMin;

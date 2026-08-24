@@ -108,6 +108,37 @@ body::after {
 
 /* ===== Header row ===== */
 .hub-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+
+.list-tabs { display: inline-flex; border: 1px solid rgba(255,255,255,0.10); border-radius: 11px; overflow: hidden; margin-bottom: 16px; }
+.list-tabs button {
+  border: 0; background: transparent; color: var(--text-tertiary);
+  font-family: inherit; font-size: 12.5px; font-weight: 600; padding: 9px 16px; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.list-tabs button.on { background: rgba(255,255,255,0.12); color: var(--text-primary); }
+
+.schedule-days-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.day-opt {
+  min-width: 44px; padding: 9px 6px; border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.03);
+  color: var(--text-tertiary); font-family: inherit; font-size: 12px; font-weight: 700;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.day-opt.sel {
+  border-color: var(--hcolor, #FF8FA3);
+  background: color-mix(in srgb, var(--hcolor, #FF8FA3) 22%, transparent);
+  color: var(--text-primary);
+}
+.schedule-freq-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); }
+.schedule-freq-row .set-input { width: 66px; flex: none; }
+
+.habit-badge {
+  display: inline-block; margin-top: 6px; padding: 3px 9px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em;
+  background: rgba(255,255,255,0.06); color: var(--text-tertiary);
+}
 .icon-btn {
   width: 42px; height: 42px; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -264,6 +295,11 @@ body::after {
     </button>
   </div>
 
+  <div class="list-tabs" id="listTabs">
+    <button type="button" data-tab="today">Today</button>
+    <button type="button" data-tab="all">All</button>
+  </div>
+
   <div id="habitList"></div>
 
 </div><!-- /.page -->
@@ -356,6 +392,30 @@ body::after {
         <button type="button" data-tod="morning" style="flex:1;">Morning</button>
         <button type="button" data-tod="afternoon" style="flex:1;">Afternoon</button>
         <button type="button" data-tod="evening" style="flex:1;">Evening</button>
+      </div>
+    </div>
+
+    <div class="field-block">
+      <label class="field-label">Schedule</label>
+      <div class="seg" id="scheduleSeg" style="width:100%; display:flex;">
+        <button type="button" data-sch="daily" style="flex:1;">Every day</button>
+        <button type="button" data-sch="days" style="flex:1;">Specific days</button>
+        <button type="button" data-sch="frequency" style="flex:1;">X per Y days</button>
+      </div>
+      <div class="schedule-days-row" id="scheduleDaysRow" style="display:none;">
+        <button type="button" class="day-opt" data-day="1">Mon</button>
+        <button type="button" class="day-opt" data-day="2">Tue</button>
+        <button type="button" class="day-opt" data-day="3">Wed</button>
+        <button type="button" class="day-opt" data-day="4">Thu</button>
+        <button type="button" class="day-opt" data-day="5">Fri</button>
+        <button type="button" class="day-opt" data-day="6">Sat</button>
+        <button type="button" class="day-opt" data-day="0">Sun</button>
+      </div>
+      <div class="schedule-freq-row" id="scheduleFreqRow" style="display:none;">
+        <input type="number" id="scheduleFreqTimes" class="set-input" min="1" max="30">
+        <span>times per</span>
+        <input type="number" id="scheduleFreqDays" class="set-input" min="1" max="90">
+        <span>days</span>
       </div>
     </div>
 
@@ -554,11 +614,52 @@ body::after {
     { key: 'evening', label: 'Evening' }
   ];
 
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Counts completions in the trailing `periodDays` days (today inclusive) —
+  // a rolling window, not fixed calendar weeks, so "3x per 7 days" just
+  // means "3 of the last 7 days", however those days fall.
+  function countDoneInWindow(habitId, periodDays) {
+    const log = state.log[habitId] || {};
+    let count = 0;
+    const d = new Date();
+    for (let i = 0; i < periodDays; i++) {
+      if (log[fmt(d)]) count++;
+      d.setDate(d.getDate() - 1);
+    }
+    return count;
+  }
+
+  function isDueToday(h) {
+    const sch = h.schedule || { type: 'daily' };
+    if (sch.type === 'days') {
+      return Array.isArray(sch.days) && sch.days.indexOf(new Date().getDay()) !== -1;
+    }
+    if (sch.type === 'frequency') {
+      const times = sch.timesPerPeriod || 1;
+      const period = sch.periodDays || 7;
+      return countDoneInWindow(h.id, period) < times;
+    }
+    return true;
+  }
+
+  function scheduleBadgeText(h) {
+    const sch = h.schedule || { type: 'daily' };
+    if (sch.type === 'days' && Array.isArray(sch.days) && sch.days.length && sch.days.length < 7) {
+      return sch.days.slice().sort().map(function (d) { return DAY_NAMES[d]; }).join(' ');
+    }
+    if (sch.type === 'frequency') {
+      return (sch.timesPerPeriod || 1) + '× / ' + (sch.periodDays || 7) + 'd';
+    }
+    return '';
+  }
+
   function buildHabitCard(h) {
     const today = fmt(new Date());
     const log = state.log[h.id] || {};
     const dateSet = new Set(Object.keys(log));
     const doneToday = !!log[today];
+    const badge = scheduleBadgeText(h);
     const card = document.createElement('div');
     card.className = 'habit-card';
     card.style.setProperty('--hcolor', h.color);
@@ -568,6 +669,7 @@ body::after {
         '<div class="habit-info">' +
           '<div class="habit-name">' + escapeHtml(h.name) + '</div>' +
           '<div class="habit-desc">' + escapeHtml(h.description || '') + '</div>' +
+          (badge ? '<div class="habit-badge">' + escapeHtml(badge) + '</div>' : '') +
         '</div>' +
         '<button class="habit-check' + (doneToday ? ' on' : '') + '" type="button" aria-label="Mark done today">' +
           (doneToday ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#0A0A0B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
@@ -582,15 +684,23 @@ body::after {
     return card;
   }
 
+  let habitsTab = 'today';
+
   function renderList() {
     const wrap = $('habitList');
     wrap.innerHTML = '';
+    $('listTabs').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === habitsTab); });
     if (state.habits.length === 0) {
       wrap.innerHTML = '<div class="empty-state">No habits yet — tap + to add your first one.</div>';
       return;
     }
+    const visible = habitsTab === 'today' ? state.habits.filter(isDueToday) : state.habits;
+    if (visible.length === 0) {
+      wrap.innerHTML = '<div class="empty-state">Nothing scheduled for today.</div>';
+      return;
+    }
     TIME_GROUPS.forEach(function (group) {
-      const habits = state.habits.filter(function (h) { return (h.timeOfDay || 'morning') === group.key; });
+      const habits = visible.filter(function (h) { return (h.timeOfDay || 'morning') === group.key; });
       if (habits.length === 0) return;
       const section = document.createElement('div');
       section.className = 'section';
@@ -602,6 +712,13 @@ body::after {
       wrap.appendChild(section);
     });
   }
+
+  $('listTabs').querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      habitsTab = b.dataset.tab;
+      renderList();
+    });
+  });
 
   function toggleToday(id) {
     const today = fmt(new Date());
@@ -764,6 +881,7 @@ body::after {
   let editingId = null;
   let editIcon = ICONS[0], editColorVal = COLORS[0], editType = 'build', editTimeOfDay = 'morning';
   let editReminderEnabled = false, editReminderTime = '09:00';
+  let editSchedule = { type: 'daily' };
 
   function populateEditor() {
     $('iconGrid').innerHTML = ICONS.map(function (ic) {
@@ -785,6 +903,7 @@ body::after {
         editColorVal = btn.dataset.color;
         $('colorGrid').querySelectorAll('.color-opt').forEach(function (b) { b.classList.toggle('sel', b === btn); });
         $('iconGrid').style.setProperty('--hcolor', editColorVal);
+        $('scheduleDaysRow').style.setProperty('--hcolor', editColorVal);
       });
     });
 
@@ -803,6 +922,44 @@ body::after {
         $('timeSeg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
       };
     });
+
+    function renderScheduleUI() {
+      $('scheduleSeg').querySelectorAll('button').forEach(function (b) {
+        b.classList.toggle('on', b.dataset.sch === editSchedule.type);
+      });
+      $('scheduleDaysRow').style.display = editSchedule.type === 'days' ? 'flex' : 'none';
+      $('scheduleFreqRow').style.display = editSchedule.type === 'frequency' ? 'flex' : 'none';
+      $('scheduleDaysRow').querySelectorAll('.day-opt').forEach(function (b) {
+        const d = Number(b.dataset.day);
+        b.classList.toggle('sel', Array.isArray(editSchedule.days) && editSchedule.days.indexOf(d) !== -1);
+      });
+      $('scheduleFreqTimes').value = editSchedule.timesPerPeriod || 3;
+      $('scheduleFreqDays').value = editSchedule.periodDays || 7;
+    }
+    $('scheduleDaysRow').style.setProperty('--hcolor', editColorVal);
+    $('scheduleSeg').querySelectorAll('button').forEach(function (b) {
+      b.onclick = function () {
+        editSchedule.type = b.dataset.sch;
+        if (editSchedule.type === 'days' && !Array.isArray(editSchedule.days)) editSchedule.days = [0, 1, 2, 3, 4, 5, 6];
+        if (editSchedule.type === 'frequency') {
+          editSchedule.timesPerPeriod = editSchedule.timesPerPeriod || 3;
+          editSchedule.periodDays = editSchedule.periodDays || 7;
+        }
+        renderScheduleUI();
+      };
+    });
+    $('scheduleDaysRow').querySelectorAll('.day-opt').forEach(function (b) {
+      b.onclick = function () {
+        const d = Number(b.dataset.day);
+        editSchedule.days = Array.isArray(editSchedule.days) ? editSchedule.days.slice() : [];
+        const i = editSchedule.days.indexOf(d);
+        if (i === -1) editSchedule.days.push(d); else editSchedule.days.splice(i, 1);
+        renderScheduleUI();
+      };
+    });
+    $('scheduleFreqTimes').oninput = function () { editSchedule.timesPerPeriod = parseInt($('scheduleFreqTimes').value, 10) || 1; };
+    $('scheduleFreqDays').oninput = function () { editSchedule.periodDays = parseInt($('scheduleFreqDays').value, 10) || 1; };
+    renderScheduleUI();
 
     $('reminderSeg').querySelectorAll('button').forEach(function (b) {
       const isOn = b.dataset.r === 'on';
@@ -826,6 +983,7 @@ body::after {
     $('editDelete').style.display = 'none';
     editIcon = ICONS[0]; editColorVal = COLORS[0]; editType = 'build'; editTimeOfDay = 'morning';
     editReminderEnabled = false; editReminderTime = '09:00';
+    editSchedule = { type: 'daily' };
     $('editName').value = ''; $('editDesc').value = '';
     populateEditor();
     openSheet('editView');
@@ -836,6 +994,7 @@ body::after {
     $('editDelete').style.display = '';
     editIcon = h.icon; editColorVal = h.color; editType = h.type; editTimeOfDay = h.timeOfDay || 'morning';
     editReminderEnabled = !!h.reminderEnabled; editReminderTime = h.reminderTime || '09:00';
+    editSchedule = h.schedule ? JSON.parse(JSON.stringify(h.schedule)) : { type: 'daily' };
     $('editName').value = h.name; $('editDesc').value = h.description || '';
     populateEditor();
     openSheet('editView');
@@ -850,12 +1009,12 @@ body::after {
     const desc = $('editDesc').value.trim();
     if (editingId) {
       const h = state.habits.find(function (x) { return x.id === editingId; });
-      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay, reminderEnabled: editReminderEnabled, reminderTime: editReminderTime, updatedAt: Date.now() });
+      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay, reminderEnabled: editReminderEnabled, reminderTime: editReminderTime, schedule: editSchedule, updatedAt: Date.now() });
     } else {
       state.habits.push({
         id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay,
-        reminderEnabled: editReminderEnabled, reminderTime: editReminderTime,
+        reminderEnabled: editReminderEnabled, reminderTime: editReminderTime, schedule: editSchedule,
         createdAt: fmt(new Date()), updatedAt: Date.now()
       });
     }

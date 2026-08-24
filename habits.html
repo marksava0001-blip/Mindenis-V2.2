@@ -127,6 +127,28 @@ body::after {
 }
 .list-tabs button.on { background: rgba(255,255,255,0.12); color: var(--text-primary); }
 
+.day-strip-wrap { margin-bottom: 18px; }
+.day-strip {
+  display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.day-strip::-webkit-scrollbar { display: none; }
+.day-strip-item {
+  flex: 0 0 auto; width: 46px; padding: 9px 0 10px; border-radius: 14px;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.day-strip-item:active { transform: scale(0.96); }
+.day-strip-dow { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); }
+.day-strip-num { font-size: 15px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.day-strip-item.is-today:not(.sel) { border-color: rgba(255,255,255,0.30); }
+.day-strip-item.sel {
+  background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.30);
+}
+.day-strip-item.sel .day-strip-dow { color: var(--text-secondary); }
+
 .schedule-days-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .day-opt {
   min-width: 44px; padding: 9px 6px; border-radius: 10px;
@@ -308,6 +330,10 @@ body::after {
   <div class="list-tabs" id="listTabs">
     <button type="button" data-tab="today">Today</button>
     <button type="button" data-tab="all">All</button>
+  </div>
+
+  <div class="day-strip-wrap" id="dayStripWrap">
+    <div class="day-strip" id="dayStrip"></div>
   </div>
 
   <div id="habitList"></div>
@@ -641,18 +667,28 @@ body::after {
     return count;
   }
 
-  function isDueToday(h) {
+  // dateStr defaulting to today lets callers reuse this for the day-strip
+  // without recomputing fmt(date) every time.
+  function isDueOnDate(h, date, dateStr) {
     const sch = h.schedule || { type: 'daily' };
     if (sch.type === 'days') {
-      return Array.isArray(sch.days) && sch.days.indexOf(new Date().getDay()) !== -1;
+      return Array.isArray(sch.days) && sch.days.indexOf(date.getDay()) !== -1;
     }
     if (sch.type === 'frequency') {
-      const times = sch.timesPerPeriod || 1;
-      const period = sch.periodDays || 7;
-      return countDoneInWindow(h.id, period) < times;
+      // The rolling-window quota only means something relative to *today* —
+      // for any other day on the strip, just show it (there's no
+      // well-defined "was this quota met as of that day" without also
+      // pinning a point-in-time view of the log).
+      if (dateStr === fmt(new Date())) {
+        const times = sch.timesPerPeriod || 1;
+        const period = sch.periodDays || 7;
+        return countDoneInWindow(h.id, period) < times;
+      }
+      return true;
     }
     return true;
   }
+  function isDueToday(h) { return isDueOnDate(h, new Date(), fmt(new Date())); }
 
   function scheduleBadgeText(h) {
     const sch = h.schedule || { type: 'daily' };
@@ -665,11 +701,11 @@ body::after {
     return '';
   }
 
-  function buildHabitCard(h) {
-    const today = fmt(new Date());
+  function buildHabitCard(h, cardDateStr) {
+    cardDateStr = cardDateStr || fmt(new Date());
     const log = state.log[h.id] || {};
     const dateSet = new Set(Object.keys(log));
-    const doneToday = !!log[today];
+    const doneOnDate = !!log[cardDateStr];
     const badge = scheduleBadgeText(h);
     const card = document.createElement('div');
     card.className = 'habit-card';
@@ -682,32 +718,77 @@ body::after {
           '<div class="habit-desc">' + escapeHtml(h.description || '') + '</div>' +
           (badge ? '<div class="habit-badge">' + escapeHtml(badge) + '</div>' : '') +
         '</div>' +
-        '<button class="habit-check' + (doneToday ? ' on' : '') + '" type="button" aria-label="Mark done today">' +
-          (doneToday ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#0A0A0B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
+        '<button class="habit-check' + (doneOnDate ? ' on' : '') + '" type="button" aria-label="Mark done">' +
+          (doneOnDate ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#0A0A0B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
         '</button>' +
       '</div>' +
       '<div class="heat-mini">' + buildMiniHeat(dateSet, h.color) + '</div>';
     card.querySelector('.habit-check').addEventListener('click', function (e) {
       e.stopPropagation();
-      toggleToday(h.id);
+      toggleForDate(h.id, cardDateStr);
     });
     card.addEventListener('click', function () { openDetail(h.id); });
     return card;
   }
 
   let habitsTab = 'today';
+  let selectedDate = new Date();
+  selectedDate.setHours(0, 0, 0, 0);
+
+  function mondayOfWeek(d) {
+    const day = d.getDay(); // 0=Sun..6=Sat
+    const diff = (day === 0 ? -6 : 1) - day;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + diff);
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  }
+
+  function renderDayStrip() {
+    const wrap = $('dayStripWrap');
+    if (habitsTab !== 'today') { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    const strip = $('dayStrip');
+    const monday = mondayOfWeek(selectedDate);
+    const todayStr = fmt(new Date());
+    const selStr = fmt(selectedDate);
+    strip.innerHTML = '';
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dStr = fmt(d);
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'day-strip-item' + (dStr === selStr ? ' sel' : '') + (dStr === todayStr ? ' is-today' : '');
+      item.innerHTML = '<span class="day-strip-dow">' + DAY_NAMES[d.getDay()] + '</span><span class="day-strip-num">' + d.getDate() + '</span>';
+      item.addEventListener('click', function () {
+        selectedDate = d;
+        renderList();
+      });
+      strip.appendChild(item);
+    }
+  }
 
   function renderList() {
     const wrap = $('habitList');
     wrap.innerHTML = '';
     $('listTabs').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === habitsTab); });
+    renderDayStrip();
     if (state.habits.length === 0) {
       wrap.innerHTML = '<div class="empty-state">No habits yet — tap + to add your first one.</div>';
       return;
     }
-    const visible = habitsTab === 'today' ? state.habits.filter(isDueToday) : state.habits;
+    let visible, cardDateStr;
+    if (habitsTab === 'today') {
+      cardDateStr = fmt(selectedDate);
+      visible = state.habits.filter(function (h) { return isDueOnDate(h, selectedDate, cardDateStr); });
+    } else {
+      cardDateStr = fmt(new Date());
+      visible = state.habits;
+    }
     if (visible.length === 0) {
-      wrap.innerHTML = '<div class="empty-state">Nothing scheduled for today.</div>';
+      const label = cardDateStr === fmt(new Date()) ? 'today' : DAY_NAMES[selectedDate.getDay()];
+      wrap.innerHTML = '<div class="empty-state">Nothing scheduled for ' + label + '.</div>';
       return;
     }
     TIME_GROUPS.forEach(function (group) {
@@ -719,7 +800,7 @@ body::after {
       title.className = 'section-title';
       title.textContent = group.label;
       section.appendChild(title);
-      habits.forEach(function (h) { section.appendChild(buildHabitCard(h)); });
+      habits.forEach(function (h) { section.appendChild(buildHabitCard(h, cardDateStr)); });
       wrap.appendChild(section);
     });
   }
@@ -727,19 +808,20 @@ body::after {
   $('listTabs').querySelectorAll('button').forEach(function (b) {
     b.addEventListener('click', function () {
       habitsTab = b.dataset.tab;
+      if (habitsTab === 'today') { selectedDate = new Date(); selectedDate.setHours(0, 0, 0, 0); }
       renderList();
     });
   });
 
-  function toggleToday(id) {
-    const today = fmt(new Date());
+  function toggleForDate(id, dateStr) {
     state.log[id] = state.log[id] || {};
-    if (state.log[id][today]) delete state.log[id][today];
-    else state.log[id][today] = true;
+    if (state.log[id][dateStr]) delete state.log[id][dateStr];
+    else state.log[id][dateStr] = true;
     saveState(state);
     renderList();
     if (currentHabitId === id) renderDetail();
   }
+  function toggleToday(id) { toggleForDate(id, fmt(new Date())); }
 
   // --- detail view -------------------------------------------------------
   let currentHabitId = null;

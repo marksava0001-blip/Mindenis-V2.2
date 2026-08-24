@@ -773,6 +773,23 @@ html, body { scrollbar-width: none; -ms-overflow-style: none; }
 .ord-add-preview.warn { background: rgba(242,192,99,0.08); border-color: rgba(242,192,99,0.20); color: #F2C063; }
 .ord-add-preview.bad  { background: rgba(255,138,138,0.08); border-color: rgba(255,138,138,0.20); color: #FF8A8A; }
 
+.ord-gmail-card { margin-top: 12px; }
+.ord-gmail-body { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ord-gmail-text { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; flex: 1; min-width: 180px; }
+.ord-gmail-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ord-gmail-btn {
+  padding: 9px 16px; border-radius: 9px; border: none; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 700;
+  background: linear-gradient(180deg, #6EE7B7, #4ED4A0); color: #04201A;
+  transition: transform 0.12s;
+}
+.ord-gmail-btn:active { transform: scale(0.96); }
+.ord-gmail-btn.secondary {
+  background: rgba(255,255,255,0.06); color: var(--text-primary); border: 1px solid rgba(255,255,255,0.10);
+}
+.ord-gmail-link { background: none; border: none; color: var(--text-tertiary); font-size: 11.5px; cursor: pointer; text-decoration: underline; padding: 4px; }
+.ord-gmail-link:hover { color: #FF8A8A; }
+
 .ord-section-h {
   display: flex; justify-content: space-between; align-items: baseline;
   margin: 18px 4px 8px;
@@ -1809,6 +1826,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <button class="ord-add-btn" id="ordAddBtn" onclick="window.__addOrder && window.__addOrder()">+ Add Order</button>
     </div>
     <div class="ord-add-preview" id="ordAddPreview">Type a cost — preview will show what % of net worth it takes.</div>
+  </div>
+
+  <!-- Gmail auto-tracking -->
+  <div class="card ord-gmail-card">
+    <div class="ord-add-eyebrow">📬 GMAIL AUTO-TRACKING</div>
+    <div class="ord-gmail-body" id="ordGmailBody">
+      <div class="ord-gmail-text">Loading…</div>
+    </div>
   </div>
 
   <!-- Items list -->
@@ -3402,6 +3427,94 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 });
+</script>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  function timeAgo(iso) {
+    if (!iso) return 'never';
+    const ms = Date.now() - new Date(iso).getTime();
+    const mins = Math.round(ms / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    return Math.round(hrs / 24) + 'd ago';
+  }
+
+  function gmailAuthUrl() {
+    const clientId = window.DASH_GMAIL_CLIENT_ID || '';
+    const redirectUri = window.location.origin + '/api/gmail-callback';
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'https://www.googleapis.com/auth/gmail.readonly',
+      access_type: 'offline',
+      prompt: 'consent',
+    });
+    return 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+  }
+
+  function renderDisconnected(body, note) {
+    body.innerHTML =
+      '<div class="ord-gmail-text">' + (note || 'Connect Gmail and Claude will scan for shipping confirmations and add them here automatically.') + '</div>' +
+      '<div class="ord-gmail-actions"><button class="ord-gmail-btn" id="ordGmailConnect" type="button">Connect Gmail</button></div>';
+    const btn = $('ordGmailConnect');
+    if (btn) btn.addEventListener('click', function () {
+      if (!window.DASH_GMAIL_CLIENT_ID) { alert('Gmail auto-tracking is not configured yet (missing GMAIL_CLIENT_ID).'); return; }
+      window.location.href = gmailAuthUrl();
+    });
+  }
+
+  function renderConnected(body, status) {
+    body.innerHTML =
+      '<div class="ord-gmail-text">Connected · last scanned ' + timeAgo(status.lastScannedAt) + '<br>' +
+        '<button class="ord-gmail-link" id="ordGmailDisconnect" type="button">Disconnect</button></div>' +
+      '<div class="ord-gmail-actions"><button class="ord-gmail-btn secondary" id="ordGmailScan" type="button">Scan now</button></div>';
+    $('ordGmailScan').addEventListener('click', async function () {
+      const btn = $('ordGmailScan');
+      btn.disabled = true; btn.textContent = 'Scanning…';
+      try {
+        const r = await fetch('/api/scan-gmail-orders', { method: 'POST' });
+        const j = await r.json();
+        if (j.skipped) alert('Scanned recently — ' + j.note);
+        else if (j.error) alert('Scan failed: ' + j.error);
+        else alert('Scanned ' + (j.scanned || 0) + ' new emails, added ' + (j.ordersAdded || 0) + ' order(s).');
+      } catch (e) {
+        alert('Scan failed: ' + e.message);
+      } finally {
+        loadGmailStatus();
+      }
+    });
+    $('ordGmailDisconnect').addEventListener('click', async function () {
+      if (!confirm('Disconnect Gmail auto-tracking?')) return;
+      await fetch('/api/gmail-disconnect', { method: 'POST' }).catch(function () {});
+      loadGmailStatus();
+    });
+  }
+
+  async function loadGmailStatus() {
+    const body = $('ordGmailBody');
+    if (!body) return;
+    try {
+      const r = await fetch('/api/gmail-status');
+      const status = await r.json();
+      if (!status.configured) { renderDisconnected(body, 'Gmail auto-tracking needs one-time server setup (see SETUP.md) before it can be connected.'); return; }
+      if (status.connected) renderConnected(body, status);
+      else renderDisconnected(body);
+    } catch (e) {
+      renderDisconnected(body, 'Could not reach the server to check Gmail status.');
+    }
+  }
+
+  if (new URLSearchParams(window.location.search).get('gmail') === 'connected') {
+    history.replaceState(null, '', window.location.pathname);
+  }
+  loadGmailStatus();
+})();
 </script>
 
 </body>

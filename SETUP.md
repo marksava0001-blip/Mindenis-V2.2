@@ -158,10 +158,76 @@ Reminders **On** → tap **Enable notifications**.
 
 ---
 
+## 6. Gmail package auto-tracking (optional)
+
+Scans your inbox for shipping/order confirmation emails and adds them straight into
+Finance → Orders, using Claude to read and classify each one. Because this needs real read
+access to your email — much more sensitive than the rest of this app's data — the Gmail
+refresh token is deliberately **not** stored the same way everything else syncs (which uses a
+public anon key by design). It lives in its own Supabase table with no anon access at all,
+readable only by the server using the secret `service_role` key.
+
+### SQL #4 — token storage + processed-message log (service_role only, no anon policy)
+```sql
+create table if not exists public.gmail_tokens (
+  id               text primary key default 'default',
+  refresh_token    text not null,
+  last_scanned_at  timestamptz,
+  updated_at       timestamptz not null default now()
+);
+alter table public.gmail_tokens enable row level security;
+-- Deliberately no policy here — anon gets zero access. Only the
+-- service_role key (used server-side only) can read/write this table.
+
+create table if not exists public.gmail_processed (
+  message_id   text primary key,
+  processed_at timestamptz not null default now()
+);
+alter table public.gmail_processed enable row level security;
+-- Same — service_role only, no anon policy.
+```
+
+### Google Cloud setup
+1. **console.cloud.google.com** → create a project (or reuse one).
+2. **APIs & Services → Library** → enable the **Gmail API**.
+3. **APIs & Services → OAuth consent screen** → User type: External → fill in the required
+   fields → add the `gmail.readonly` scope → under **Test users**, add your own Google account.
+   Leave it in **Testing** mode — you don't need Google's app review for a personal app used
+   only by accounts you've added as testers.
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID** → type **Web
+   application** → Authorized redirect URI: `https://your-app.vercel.app/api/gmail-callback`
+   (your real Vercel domain).
+5. Copy the **Client ID** and **Client Secret**.
+
+### Supabase service_role key
+Supabase → **Project Settings → API** → copy the **`service_role`** key.
+⚠️ This key bypasses all Row Level Security — it must **only** ever be set as a Vercel env var,
+**never** put in any client-side file (`sync.js`, `topbar.js`, etc.) alongside the anon key.
+
+### Vercel env vars
+| Variable | Value |
+|---|---|
+| `GMAIL_CLIENT_ID` | from step 5 above |
+| `GMAIL_CLIENT_SECRET` | from step 5 above (**secret**) |
+| `SUPABASE_SERVICE_ROLE_KEY` | the `service_role` key above (**secret**) |
+| `ANTHROPIC_API_KEY` | your own key from console.anthropic.com — this pays for the scans |
+
+Redeploy after adding these.
+
+### Connect it
+Finance → Orders tab → **Connect Gmail** → sign in → grant access. You'll land back on
+Finance with it connected. Tap **Scan now** any time, or add a second free cron job (same
+account as the habit-reminders one) hitting `https://your-app.vercel.app/api/scan-gmail-orders`
+with `POST`, no auth header needed, every 15-30 minutes — the endpoint throttles itself so it
+won't scan more than once every 10 minutes regardless of how often it's pinged.
+
+---
+
 ## TL;DR
 1. Fork → import to Vercel → deploy.
 2. New Supabase → run the **SQL** above → paste your **URL + anon key** into `sync.js`,
    `topbar.js`, `gym.html`.
 3. (Optional) WHOOP: Client ID in `health.html` + the two env vars in Vercel.
 4. (Optional) Habit reminders: SQL #3 + the four env vars above + Add to Home Screen on iOS.
-5. Change the password in `lock.js`. Done.
+5. (Optional) Gmail auto-tracking: SQL #4 + Google Cloud OAuth app + the four env vars above.
+6. Change the password in `lock.js`. Done.

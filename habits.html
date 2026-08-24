@@ -99,6 +99,15 @@ body::after {
 .gm-ghost:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.18); }
 
 .reminder-time-input { color-scheme: dark; width: 100%; }
+.reminder-time-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.reminder-time-row .reminder-time-input { flex: 1; }
+.reminder-time-remove {
+  flex-shrink: 0; width: 34px; height: 34px; border-radius: 9px;
+  border: 1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.04);
+  color: var(--text-tertiary); font-size: 16px; line-height: 1; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.reminder-time-remove:hover { background: rgba(255,107,107,0.12); color: var(--danger); border-color: rgba(255,107,107,0.25); }
 .reminder-hint { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; margin-top: 8px; }
 .reminder-hint a, .reminder-hint button.link {
   background: none; border: none; padding: 0; font: inherit;
@@ -426,7 +435,8 @@ body::after {
         <button type="button" data-r="off" style="flex:1;">Off</button>
         <button type="button" data-r="on" style="flex:1;">On</button>
       </div>
-      <input type="time" class="set-input reminder-time-input" id="reminderTime" style="margin-top:10px; display:none;">
+      <div id="reminderTimesList" style="display:none; margin-top:10px;"></div>
+      <button type="button" class="gm-ghost" id="reminderAddTime" style="display:none; margin-top:8px; padding:8px 14px; font-size:12px;">+ Add another time</button>
       <div class="reminder-hint" id="reminderHint" style="display:none;"></div>
     </div>
 
@@ -881,7 +891,7 @@ body::after {
   // --- add / edit sheet -------------------------------------------------------
   let editingId = null;
   let editIcon = ICONS[0], editColorVal = COLORS[0], editType = 'build', editTimeOfDay = 'morning';
-  let editReminderEnabled = false, editReminderTime = '09:00';
+  let editReminderEnabled = false, editReminderTimes = ['09:00'];
   let editSchedule = { type: 'daily' };
 
   function populateEditor() {
@@ -962,19 +972,49 @@ body::after {
     $('scheduleFreqDays').oninput = function () { editSchedule.periodDays = parseInt($('scheduleFreqDays').value, 10) || 1; };
     renderScheduleUI();
 
+    function renderReminderTimesList() {
+      const list = $('reminderTimesList');
+      list.innerHTML = editReminderTimes.map(function (t, i) {
+        return '<div class="reminder-time-row">' +
+          '<input type="time" class="set-input reminder-time-input" data-i="' + i + '" value="' + t + '">' +
+          '<button type="button" class="reminder-time-remove" data-i="' + i + '" aria-label="Remove time" ' + (editReminderTimes.length <= 1 ? 'style="visibility:hidden;"' : '') + '>×</button>' +
+        '</div>';
+      }).join('');
+      list.querySelectorAll('.reminder-time-input').forEach(function (inp) {
+        inp.oninput = function () { editReminderTimes[Number(inp.dataset.i)] = inp.value || '09:00'; };
+      });
+      list.querySelectorAll('.reminder-time-remove').forEach(function (btn) {
+        btn.onclick = function () {
+          if (editReminderTimes.length <= 1) return;
+          editReminderTimes.splice(Number(btn.dataset.i), 1);
+          renderReminderTimesList();
+        };
+      });
+    }
     $('reminderSeg').querySelectorAll('button').forEach(function (b) {
       const isOn = b.dataset.r === 'on';
       b.classList.toggle('on', isOn === editReminderEnabled);
       b.onclick = function () {
         editReminderEnabled = isOn;
         $('reminderSeg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
-        $('reminderTime').style.display = editReminderEnabled ? '' : 'none';
+        $('reminderTimesList').style.display = editReminderEnabled ? '' : 'none';
+        $('reminderAddTime').style.display = editReminderEnabled ? '' : 'none';
+        if (editReminderEnabled && !editReminderTimes.length) editReminderTimes.push('09:00');
+        renderReminderTimesList();
         renderReminderHint();
       };
     });
-    $('reminderTime').value = editReminderTime;
-    $('reminderTime').style.display = editReminderEnabled ? '' : 'none';
-    $('reminderTime').oninput = function () { editReminderTime = $('reminderTime').value || '09:00'; };
+    $('reminderAddTime').onclick = function () {
+      const last = editReminderTimes[editReminderTimes.length - 1] || '09:00';
+      const [hh, mm] = last.split(':').map(Number);
+      const bumped = new Date(2000, 0, 1, hh, mm);
+      bumped.setHours(bumped.getHours() + 1);
+      editReminderTimes.push(String(bumped.getHours()).padStart(2, '0') + ':' + String(bumped.getMinutes()).padStart(2, '0'));
+      renderReminderTimesList();
+    };
+    $('reminderTimesList').style.display = editReminderEnabled ? '' : 'none';
+    $('reminderAddTime').style.display = editReminderEnabled ? '' : 'none';
+    renderReminderTimesList();
     renderReminderHint();
   }
 
@@ -983,7 +1023,7 @@ body::after {
     $('editHeading').textContent = 'Add Habit';
     $('editDelete').style.display = 'none';
     editIcon = ICONS[0]; editColorVal = COLORS[0]; editType = 'build'; editTimeOfDay = 'morning';
-    editReminderEnabled = false; editReminderTime = '09:00';
+    editReminderEnabled = false; editReminderTimes = ['09:00'];
     editSchedule = { type: 'daily' };
     $('editName').value = ''; $('editDesc').value = '';
     populateEditor();
@@ -994,7 +1034,8 @@ body::after {
     $('editHeading').textContent = 'Edit Habit';
     $('editDelete').style.display = '';
     editIcon = h.icon; editColorVal = h.color; editType = h.type; editTimeOfDay = h.timeOfDay || 'morning';
-    editReminderEnabled = !!h.reminderEnabled; editReminderTime = h.reminderTime || '09:00';
+    editReminderEnabled = !!h.reminderEnabled;
+    editReminderTimes = (Array.isArray(h.reminderTimes) && h.reminderTimes.length) ? h.reminderTimes.slice() : (h.reminderTime ? [h.reminderTime] : ['09:00']);
     editSchedule = h.schedule ? JSON.parse(JSON.stringify(h.schedule)) : { type: 'daily' };
     $('editName').value = h.name; $('editDesc').value = h.description || '';
     populateEditor();
@@ -1008,14 +1049,16 @@ body::after {
     const name = $('editName').value.trim();
     if (!name) { $('editName').focus(); return; }
     const desc = $('editDesc').value.trim();
+    const reminderTimes = editReminderTimes.filter(Boolean);
     if (editingId) {
       const h = state.habits.find(function (x) { return x.id === editingId; });
-      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay, reminderEnabled: editReminderEnabled, reminderTime: editReminderTime, schedule: editSchedule, updatedAt: Date.now() });
+      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay, reminderEnabled: editReminderEnabled, reminderTimes: reminderTimes, schedule: editSchedule, updatedAt: Date.now() });
+      delete h.reminderTime;
     } else {
       state.habits.push({
         id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay,
-        reminderEnabled: editReminderEnabled, reminderTime: editReminderTime, schedule: editSchedule,
+        reminderEnabled: editReminderEnabled, reminderTimes: reminderTimes, schedule: editSchedule,
         createdAt: fmt(new Date()), updatedAt: Date.now()
       });
     }

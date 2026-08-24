@@ -128,8 +128,9 @@ create policy "anon full access push_subscriptions"
 create table if not exists public.reminder_log (
   habit_id text not null,
   date     text not null,
+  time     text not null,
   sent_at  timestamptz not null default now(),
-  primary key (habit_id, date)
+  primary key (habit_id, date, time)
 );
 alter table public.reminder_log enable row level security;
 create policy "anon full access reminder_log"

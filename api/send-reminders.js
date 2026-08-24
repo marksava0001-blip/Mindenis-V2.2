@@ -133,37 +133,44 @@ export default async function handler(req, res) {
     const log = habitsState.log || {};
     const deletedIds = habitsState.deletedIds || {};
 
-    const dueHabits = habitsState.habits.filter((h) => {
-      if (!h || deletedIds[h.id]) return false;
-      if (!h.reminderEnabled || !h.reminderTime) return false;
+    // A habit can have several independent reminder times in one day —
+    // each is checked and deduped separately (reminder_log is keyed by
+    // habit + date + time, not just habit + date).
+    const dueEntries = [];
+    habitsState.habits.forEach((h) => {
+      if (!h || deletedIds[h.id]) return;
+      if (!h.reminderEnabled) return;
+      const times = (Array.isArray(h.reminderTimes) && h.reminderTimes.length) ? h.reminderTimes : (h.reminderTime ? [h.reminderTime] : []);
+      if (!times.length) return;
       const doneToday = !!(log[h.id] && log[h.id][today]);
-      if (doneToday) return false;
-      if (!isDueBySchedule(h, tz, log)) return false;
-      const reminderMin = timeToMinutes(h.reminderTime);
-      if (reminderMin == null) return false;
-      const delta = nowMin - reminderMin;
-      return delta >= 0 && delta < DUE_WINDOW_MINUTES;
+      if (doneToday) return;
+      if (!isDueBySchedule(h, tz, log)) return;
+      times.forEach((t) => {
+        const reminderMin = timeToMinutes(t);
+        if (reminderMin == null) return;
+        const delta = nowMin - reminderMin;
+        if (delta >= 0 && delta < DUE_WINDOW_MINUTES) dueEntries.push({ habit: h, time: t });
+      });
     });
 
-    if (!dueHabits.length) {
+    if (!dueEntries.length) {
       return res.status(200).json({ ok: true, due: 0, sent: 0 });
     }
 
-    // --- filter out habits already reminded today ---------------------
+    // --- filter out (habit, time) pairs already reminded today --------
     const logCheck = await supaFetch(
       SUPABASE_URL, SUPABASE_KEY,
-      'reminder_log?select=habit_id,date&date=eq.' + encodeURIComponent(today) +
-        '&habit_id=in.(' + dueHabits.map((h) => encodeURIComponent(h.id)).join(',') + ')',
+      'reminder_log?select=habit_id,time&date=eq.' + encodeURIComponent(today),
       { method: 'GET' }
     );
     const alreadySent = new Set();
     if (logCheck.ok) {
       const rows = await logCheck.json();
-      rows.forEach((r) => alreadySent.add(r.habit_id));
+      rows.forEach((r) => alreadySent.add(r.habit_id + '|' + r.time));
     }
-    const toSend = dueHabits.filter((h) => !alreadySent.has(h.id));
+    const toSend = dueEntries.filter((e) => !alreadySent.has(e.habit.id + '|' + e.time));
     if (!toSend.length) {
-      return res.status(200).json({ ok: true, due: dueHabits.length, sent: 0, note: 'all already sent today' });
+      return res.status(200).json({ ok: true, due: dueEntries.length, sent: 0, note: 'all already sent today' });
     }
 
     // --- load subscriptions ---------------------------------------------
@@ -177,11 +184,12 @@ export default async function handler(req, res) {
     let sentCount = 0;
     const deadEndpoints = [];
 
-    for (const h of toSend) {
+    for (const entry of toSend) {
+      const h = entry.habit;
       const payload = JSON.stringify({
         title: (h.icon ? h.icon + ' ' : '') + h.name,
         body: h.description ? h.description : "It's time — mark it done when you're there.",
-        tag: 'habit-' + h.id,
+        tag: 'habit-' + h.id + '-' + entry.time,
         url: '/habits.html',
       });
       let anySucceeded = false;
@@ -200,7 +208,7 @@ export default async function handler(req, res) {
         await supaFetch(SUPABASE_URL, SUPABASE_KEY, 'reminder_log', {
           method: 'POST',
           headers: { Prefer: 'resolution=merge-duplicates' },
-          body: JSON.stringify({ habit_id: h.id, date: today }),
+          body: JSON.stringify({ habit_id: h.id, date: today, time: entry.time }),
         });
       }
     }

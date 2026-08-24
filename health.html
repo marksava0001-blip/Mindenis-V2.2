@@ -121,22 +121,6 @@ main {
   font-weight: 300;
 }
 
-.water-embed { margin-top: 56px; }
-.water-iframe {
-  display: block;
-  width: 100%;
-  height: 880px;
-  border: 0;
-  background: transparent;
-  border-radius: 16px;
-  overflow: hidden;
-  color-scheme: dark;
-}
-@media (max-width: 480px) {
-  .water-embed { margin-top: 40px; }
-  .water-iframe { height: 780px; }
-}
-
 .stack-card {
   background: var(--bg-card);
   border-radius: 16px;
@@ -508,185 +492,6 @@ main {
 <body>
 
 <main>
-
-  <!-- ===== Metrics ===== -->
-  <style>
-    .mx-section { margin-bottom: 32px; }
-    .mx-card {
-      padding: 20px 20px 18px;
-      background: rgba(255,255,255,0.025);
-      border-radius: 22px;
-      box-shadow: 0 1px 0 0 rgba(255,255,255,0.06) inset, 0 12px 40px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.25);
-    }
-    .mx-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .mx-field { display:flex; flex-direction:column; gap:6px; }
-    .mx-field.full { grid-column: 1 / -1; }
-    .mx-field label { font-size:10px; font-weight:700; letter-spacing:0.10em; text-transform:uppercase; color:var(--text-tertiary); }
-    .mx-field input[type="number"] {
-      background: rgba(0,0,0,0.28); border:1px solid var(--border-strong); color:var(--text-primary);
-      font-family:inherit; font-size:16px; padding:10px 12px; border-radius:10px; outline:none;
-      -moz-appearance: textfield;
-    }
-    .mx-field input[type="number"]::-webkit-outer-spin-button,
-    .mx-field input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-    .mx-field input[type="number"]:focus { border-color: rgba(29,158,117,0.45); box-shadow: 0 0 0 2px var(--accent-glow); }
-    .mx-seg { display:flex; gap:4px; background: rgba(255,255,255,0.04); border:1px solid var(--border-strong); border-radius:10px; padding:3px; }
-    .mx-seg button { flex:1; padding:9px; border:none; background:transparent; color:var(--text-tertiary); border-radius:7px; font-family:inherit; font-size:12px; font-weight:600; cursor:pointer; -webkit-tap-highlight-color: transparent; }
-    .mx-seg button.active { background: linear-gradient(180deg,#fff,#e8e5dd); color:#0A0A0B; }
-    .mx-summary { margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.05); display:flex; gap:22px; flex-wrap:wrap; }
-    .mx-summary-label { font-size:10px; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.10em; font-weight:700; margin-bottom:4px; }
-    .mx-summary-val { font-size:18px; font-weight:700; color:var(--text-primary); font-variant-numeric:tabular-nums; }
-    .mx-hint { font-size:11px; color:var(--text-tertiary); margin-top:12px; line-height:1.5; }
-  </style>
-  <div class="mx-section">
-    <div class="section-title">Metrics</div>
-    <div class="mx-card">
-      <div class="mx-grid">
-        <div class="mx-field">
-          <label>Weight</label>
-          <input type="number" id="mxWeight" min="20" max="400" step="0.5">
-        </div>
-        <div class="mx-field">
-          <label>Weight unit</label>
-          <div class="mx-seg" id="mxWeightUnit">
-            <button data-u="kg" type="button">kg</button>
-            <button data-u="lb" type="button">lb</button>
-          </div>
-        </div>
-        <div class="mx-field">
-          <label>Height (cm)</label>
-          <input type="number" id="mxHeight" min="100" max="250" step="1">
-        </div>
-        <div class="mx-field">
-          <label>Age</label>
-          <input type="number" id="mxAge" min="10" max="100" step="1">
-        </div>
-        <div class="mx-field full">
-          <label>Sex</label>
-          <div class="mx-seg" id="mxSex">
-            <button data-s="m" type="button">Male</button>
-            <button data-s="f" type="button">Female</button>
-            <button data-s="o" type="button">Other</button>
-          </div>
-        </div>
-        <div class="mx-field full">
-          <label>Activity (training hours / week)</label>
-          <input type="number" id="mxActivity" min="0" max="40" step="0.5">
-        </div>
-      </div>
-      <div class="mx-summary">
-        <div>
-          <div class="mx-summary-label">BMI</div>
-          <div class="mx-summary-val" id="mxBmi">—</div>
-        </div>
-        <div>
-          <div class="mx-summary-label">Water target</div>
-          <div class="mx-summary-val" id="mxWaterTarget">—</div>
-        </div>
-      </div>
-      <div class="mx-hint">Feeds the water tracker below — its target updates automatically as you edit these.</div>
-    </div>
-  </div>
-  <script>
-  (function () {
-    const $ = (id) => document.getElementById(id);
-    const WATER_KEY = 'po_water_v1';
-
-    function loadWaterState() {
-      let s = null;
-      try { s = JSON.parse(localStorage.getItem(WATER_KEY)); } catch (e) {}
-      if (!s || typeof s !== 'object') s = {};
-      s.weightUnit = s.weightUnit || 'kg';
-      s.profile = Object.assign({ weightKg: 75, age: 25, sex: 'm', activityHrsPerWeek: 5 }, s.profile || {});
-      s.unit = s.unit || 'bottle';
-      s.bottleMl = s.bottleMl || 500;
-      s.glassMl = s.glassMl || 250;
-      s.caffeineMgPerDay = (s.caffeineMgPerDay != null) ? s.caffeineMgPerDay : 200;
-      s.substances = Array.isArray(s.substances) ? s.substances : [];
-      s.logs = (s.logs && typeof s.logs === 'object') ? s.logs : {};
-      return s;
-    }
-    function saveWaterState(s) {
-      try {
-        localStorage.setItem(WATER_KEY, JSON.stringify(s));
-        window.dispatchEvent(new Event('storage'));
-      } catch (e) {}
-    }
-
-    let water = loadWaterState();
-
-    function computeTargetMl(s) {
-      const p = s.profile;
-      const wKg = s.weightUnit === 'lb' ? (p.weightKg || 0) / 2.20462 : (p.weightKg || 0);
-      const base = wKg * 35;
-      const exercise = (p.activityHrsPerWeek || 0) / 7 * 500;
-      const caffeine = Math.max(0, (s.caffeineMgPerDay || 0) - 200) * 1.5;
-      const subs = (s.substances || []).reduce((sum, x) => {
-        const dose = (x && x.dose != null ? x.dose : (x && x.defaultDose)) || 0;
-        return sum + Math.max(0, dose * ((x && x.mlPerUnit) || 0));
-      }, 0);
-      let adjust = 0;
-      if (p.sex === 'm') adjust += 200;
-      if ((p.age || 0) >= 50) adjust += 100;
-      return base + exercise + caffeine + subs + adjust;
-    }
-
-    function setSegActive(segId, value) {
-      $(segId).querySelectorAll('button').forEach(b => {
-        const v = b.dataset.u || b.dataset.s;
-        b.classList.toggle('active', v === value);
-      });
-    }
-    function bindSeg(segId, attr, onPick) {
-      $(segId).querySelectorAll('button').forEach(b => {
-        b.addEventListener('click', () => {
-          onPick(b.dataset[attr]);
-          renderMetricsForm();
-        });
-      });
-    }
-
-    function renderSummary() {
-      const p = water.profile;
-      const wKg = water.weightUnit === 'lb' ? (p.weightKg || 0) / 2.20462 : (p.weightKg || 0);
-      const hM = (p.heightCm || 0) / 100;
-      if (wKg > 0 && hM > 0) {
-        const bmi = wKg / (hM * hM);
-        $('mxBmi').textContent = bmi.toFixed(1);
-      } else {
-        $('mxBmi').textContent = '—';
-      }
-      const targetMl = computeTargetMl(water);
-      $('mxWaterTarget').textContent = targetMl >= 1000 ? (targetMl / 1000).toFixed(1) + ' L/day' : Math.round(targetMl) + ' ml/day';
-    }
-
-    function renderMetricsForm() {
-      $('mxWeight').value = water.profile.weightKg || '';
-      $('mxHeight').value = water.profile.heightCm || '';
-      $('mxAge').value = water.profile.age || '';
-      $('mxActivity').value = water.profile.activityHrsPerWeek || '';
-      setSegActive('mxWeightUnit', water.weightUnit);
-      setSegActive('mxSex', water.profile.sex);
-      renderSummary();
-    }
-
-    bindSeg('mxWeightUnit', 'u', (v) => { water.weightUnit = v; saveWaterState(water); });
-    bindSeg('mxSex', 's', (v) => { water.profile.sex = v; saveWaterState(water); });
-
-    [['mxWeight', 'weightKg'], ['mxHeight', 'heightCm'], ['mxAge', 'age'], ['mxActivity', 'activityHrsPerWeek']].forEach(([id, field]) => {
-      $(id).addEventListener('input', () => {
-        const v = parseFloat($(id).value);
-        water.profile[field] = isNaN(v) ? 0 : v;
-        saveWaterState(water);
-        renderSummary();
-      });
-    });
-
-    window.addEventListener('storage', () => { water = loadWaterState(); renderMetricsForm(); });
-
-    renderMetricsForm();
-  })();
-  </script>
 
   <!-- ===== WHOOP card (full) ===== -->
   <style>
@@ -1109,10 +914,184 @@ main {
     </div>
   </div>
 
-  <section id="water" class="water-embed">
-    <div class="section-title">Water Tracker</div>
-    <iframe src="po-water.html" class="water-iframe" loading="lazy" title="Water Tracker"></iframe>
-  </section>
+  <!-- ===== Metrics ===== -->
+  <style>
+    .mx-section { margin-top: 32px; margin-bottom: 32px; }
+    .mx-card {
+      padding: 20px 20px 18px;
+      background: rgba(255,255,255,0.025);
+      border-radius: 22px;
+      box-shadow: 0 1px 0 0 rgba(255,255,255,0.06) inset, 0 12px 40px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.25);
+    }
+    .mx-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .mx-field { display:flex; flex-direction:column; gap:6px; }
+    .mx-field.full { grid-column: 1 / -1; }
+    .mx-field label { font-size:10px; font-weight:700; letter-spacing:0.10em; text-transform:uppercase; color:var(--text-tertiary); }
+    .mx-field input[type="number"] {
+      background: rgba(0,0,0,0.28); border:1px solid var(--border-strong); color:var(--text-primary);
+      font-family:inherit; font-size:16px; padding:10px 12px; border-radius:10px; outline:none;
+      -moz-appearance: textfield;
+    }
+    .mx-field input[type="number"]::-webkit-outer-spin-button,
+    .mx-field input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .mx-field input[type="number"]:focus { border-color: rgba(29,158,117,0.45); box-shadow: 0 0 0 2px var(--accent-glow); }
+    .mx-seg { display:flex; gap:4px; background: rgba(255,255,255,0.04); border:1px solid var(--border-strong); border-radius:10px; padding:3px; }
+    .mx-seg button { flex:1; padding:9px; border:none; background:transparent; color:var(--text-tertiary); border-radius:7px; font-family:inherit; font-size:12px; font-weight:600; cursor:pointer; -webkit-tap-highlight-color: transparent; }
+    .mx-seg button.active { background: linear-gradient(180deg,#fff,#e8e5dd); color:#0A0A0B; }
+    .mx-summary { margin-top:16px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.05); display:flex; gap:22px; flex-wrap:wrap; }
+    .mx-summary-label { font-size:10px; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.10em; font-weight:700; margin-bottom:4px; }
+    .mx-summary-val { font-size:18px; font-weight:700; color:var(--text-primary); font-variant-numeric:tabular-nums; }
+    .mx-hint { font-size:11px; color:var(--text-tertiary); margin-top:12px; line-height:1.5; }
+  </style>
+  <div class="mx-section">
+    <div class="section-title">Metrics</div>
+    <div class="mx-card">
+      <div class="mx-grid">
+        <div class="mx-field">
+          <label>Weight</label>
+          <input type="number" id="mxWeight" min="20" max="400" step="0.5">
+        </div>
+        <div class="mx-field">
+          <label>Weight unit</label>
+          <div class="mx-seg" id="mxWeightUnit">
+            <button data-u="kg" type="button">kg</button>
+            <button data-u="lb" type="button">lb</button>
+          </div>
+        </div>
+        <div class="mx-field">
+          <label>Height (cm)</label>
+          <input type="number" id="mxHeight" min="100" max="250" step="1">
+        </div>
+        <div class="mx-field">
+          <label>Age</label>
+          <input type="number" id="mxAge" min="10" max="100" step="1">
+        </div>
+        <div class="mx-field full">
+          <label>Sex</label>
+          <div class="mx-seg" id="mxSex">
+            <button data-s="m" type="button">Male</button>
+            <button data-s="f" type="button">Female</button>
+            <button data-s="o" type="button">Other</button>
+          </div>
+        </div>
+        <div class="mx-field full">
+          <label>Activity (training hours / week)</label>
+          <input type="number" id="mxActivity" min="0" max="40" step="0.5">
+        </div>
+      </div>
+      <div class="mx-summary">
+        <div>
+          <div class="mx-summary-label">BMI</div>
+          <div class="mx-summary-val" id="mxBmi">—</div>
+        </div>
+        <div>
+          <div class="mx-summary-label">Water target</div>
+          <div class="mx-summary-val" id="mxWaterTarget">—</div>
+        </div>
+      </div>
+      <div class="mx-hint">Feeds the Water tracker's daily target — updates automatically as you edit these.</div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const $ = (id) => document.getElementById(id);
+    const WATER_KEY = 'po_water_v1';
+
+    function loadWaterState() {
+      let s = null;
+      try { s = JSON.parse(localStorage.getItem(WATER_KEY)); } catch (e) {}
+      if (!s || typeof s !== 'object') s = {};
+      s.weightUnit = s.weightUnit || 'kg';
+      s.profile = Object.assign({ weightKg: 75, age: 25, sex: 'm', activityHrsPerWeek: 5 }, s.profile || {});
+      s.unit = s.unit || 'bottle';
+      s.bottleMl = s.bottleMl || 500;
+      s.glassMl = s.glassMl || 250;
+      s.caffeineMgPerDay = (s.caffeineMgPerDay != null) ? s.caffeineMgPerDay : 200;
+      s.substances = Array.isArray(s.substances) ? s.substances : [];
+      s.logs = (s.logs && typeof s.logs === 'object') ? s.logs : {};
+      return s;
+    }
+    function saveWaterState(s) {
+      try {
+        localStorage.setItem(WATER_KEY, JSON.stringify(s));
+        window.dispatchEvent(new Event('storage'));
+      } catch (e) {}
+    }
+
+    let water = loadWaterState();
+
+    function computeTargetMl(s) {
+      const p = s.profile;
+      const wKg = s.weightUnit === 'lb' ? (p.weightKg || 0) / 2.20462 : (p.weightKg || 0);
+      const base = wKg * 35;
+      const exercise = (p.activityHrsPerWeek || 0) / 7 * 500;
+      const caffeine = Math.max(0, (s.caffeineMgPerDay || 0) - 200) * 1.5;
+      const subs = (s.substances || []).reduce((sum, x) => {
+        const dose = (x && x.dose != null ? x.dose : (x && x.defaultDose)) || 0;
+        return sum + Math.max(0, dose * ((x && x.mlPerUnit) || 0));
+      }, 0);
+      let adjust = 0;
+      if (p.sex === 'm') adjust += 200;
+      if ((p.age || 0) >= 50) adjust += 100;
+      return base + exercise + caffeine + subs + adjust;
+    }
+
+    function setSegActive(segId, value) {
+      $(segId).querySelectorAll('button').forEach(b => {
+        const v = b.dataset.u || b.dataset.s;
+        b.classList.toggle('active', v === value);
+      });
+    }
+    function bindSeg(segId, attr, onPick) {
+      $(segId).querySelectorAll('button').forEach(b => {
+        b.addEventListener('click', () => {
+          onPick(b.dataset[attr]);
+          renderMetricsForm();
+        });
+      });
+    }
+
+    function renderSummary() {
+      const p = water.profile;
+      const wKg = water.weightUnit === 'lb' ? (p.weightKg || 0) / 2.20462 : (p.weightKg || 0);
+      const hM = (p.heightCm || 0) / 100;
+      if (wKg > 0 && hM > 0) {
+        const bmi = wKg / (hM * hM);
+        $('mxBmi').textContent = bmi.toFixed(1);
+      } else {
+        $('mxBmi').textContent = '—';
+      }
+      const targetMl = computeTargetMl(water);
+      $('mxWaterTarget').textContent = targetMl >= 1000 ? (targetMl / 1000).toFixed(1) + ' L/day' : Math.round(targetMl) + ' ml/day';
+    }
+
+    function renderMetricsForm() {
+      $('mxWeight').value = water.profile.weightKg || '';
+      $('mxHeight').value = water.profile.heightCm || '';
+      $('mxAge').value = water.profile.age || '';
+      $('mxActivity').value = water.profile.activityHrsPerWeek || '';
+      setSegActive('mxWeightUnit', water.weightUnit);
+      setSegActive('mxSex', water.profile.sex);
+      renderSummary();
+    }
+
+    bindSeg('mxWeightUnit', 'u', (v) => { water.weightUnit = v; saveWaterState(water); });
+    bindSeg('mxSex', 's', (v) => { water.profile.sex = v; saveWaterState(water); });
+
+    [['mxWeight', 'weightKg'], ['mxHeight', 'heightCm'], ['mxAge', 'age'], ['mxActivity', 'activityHrsPerWeek']].forEach(([id, field]) => {
+      $(id).addEventListener('input', () => {
+        const v = parseFloat($(id).value);
+        water.profile[field] = isNaN(v) ? 0 : v;
+        saveWaterState(water);
+        renderSummary();
+      });
+    });
+
+    window.addEventListener('storage', () => { water = loadWaterState(); renderMetricsForm(); });
+
+    renderMetricsForm();
+  })();
+  </script>
 
   <div class="attribution">// editable template · all data stays in your browser</div>
 </main>

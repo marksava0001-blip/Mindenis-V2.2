@@ -50,6 +50,12 @@ html, body {
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
   min-height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+@media (max-width: 768px) {
+  /* This page doesn't load topbar.js (which sets this everywhere else),
+     so without it taps here get the browser's default ~300ms tap delay. */
+  html { touch-action: pan-y; }
 }
 
 /* Backdrop — black with subtle warm + cool washes */

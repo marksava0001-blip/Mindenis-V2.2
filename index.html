@@ -94,6 +94,13 @@ body::after {
   box-shadow: 0 16px 48px rgba(0,0,0,0.55);
 }
 .tile:hover::before { opacity: 1; }
+/* Instant press feedback — :hover alone doesn't reliably show on tap,
+   so without this a tap gives no visual response until the next page
+   has loaded, which reads as unresponsive even when it isn't. */
+.tile:active {
+  transform: scale(0.965);
+  transition: transform 0.08s ease;
+}
 
 /* Tile sizes */
 .tile.big  { grid-column: span 2; grid-row: span 2; }

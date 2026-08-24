@@ -85,7 +85,11 @@ body::after {
 .shell {
   max-width: 880px;
   margin: 0 auto;
-  padding: 24px 16px 100px;   /* extra bottom padding so tab bar doesn't cover content */
+  /* Top padding clears both the safe-area inset (notch/Dynamic Island) and
+     the fixed sync-status badge (sync.js), which sits at
+     safe-area-inset-top + 6px..30px — finance.html has no topbar.js chrome
+     of its own to naturally reserve that space, so it has to do it here. */
+  padding: calc(env(safe-area-inset-top, 0px) + 46px) 16px 100px;
 }
 
 /* ===== Back to dashboard ===== */

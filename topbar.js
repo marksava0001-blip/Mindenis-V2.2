@@ -275,13 +275,18 @@ body.topbar-modal-open {
     if (status === 'warn' || status === 'miss') pillEl.classList.add(status);
   }
 
+  function fmtCount(n) {
+    const rounded = Math.round(n * 10) / 10;
+    return (rounded % 1 === 0) ? String(rounded) : rounded.toFixed(1);
+  }
+
   function render() {
     const waterEl = document.getElementById('topbarWater');
     if (!waterEl) return; // not injected yet
 
     const w = getWaterProgress();
     const countEl = document.getElementById('topbarWaterCount');
-    if (countEl) countEl.textContent = w.total ? w.done + '/' + w.total : '0/0';
+    if (countEl) countEl.textContent = w.total ? fmtCount(w.done) + '/' + w.total : '0/0';
     setPillStatus(waterEl, classifyStatus(w.done, w.total));
   }
 

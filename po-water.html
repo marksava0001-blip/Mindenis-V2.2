@@ -221,6 +221,36 @@ html, body {
 }
 .water-helper.good { color: var(--good); font-style: normal; }
 
+/* ----- Bottle/glass size control ----- */
+.water-size {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 14px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.water-size-label {
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+}
+.water-size-input-wrap {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,0.28);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.water-size-input {
+  width: 60px; background: transparent; border: none; outline: none;
+  color: var(--text-1); font-family: inherit; font-size: 15px;
+  font-weight: 700; text-align: right;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+.water-size-input::-webkit-outer-spin-button,
+.water-size-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.water-size-unit { font-size: 12px; color: var(--text-3); }
+
 /* ----- Custom ml logging ----- */
 .water-custom {
   margin-top: 16px; padding-top: 16px;
@@ -541,6 +571,14 @@ html, body {
       </div>
     </div>
 
+    <div class="water-size" id="waterSizeRow">
+      <span class="water-size-label" id="waterSizeLabel">Bottle size</span>
+      <div class="water-size-input-wrap">
+        <input type="number" id="waterSizeMl" class="water-size-input" min="50" max="2000" step="10" inputmode="numeric">
+        <span class="water-size-unit">ml</span>
+      </div>
+    </div>
+
     <div class="water-actions">
       <button class="water-minus-btn" id="waterMinusBtn" type="button" aria-label="Undo last">−</button>
       <button class="water-plus-btn" id="waterPlusBtn" type="button">
@@ -767,7 +805,14 @@ html, body {
     return s;
   }
   function saveState() {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {}
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+      // Native 'storage' events don't fire on the document that made the
+      // write — dispatch one manually so the topbar's water pill (running
+      // in this same document when this page is opened directly) updates
+      // immediately instead of waiting on its 30s poll / next focus.
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {}
   }
   let state = loadState();
   $('appTitle').textContent = CONFIG.appTitle || 'Water Coach';
@@ -828,6 +873,28 @@ html, body {
     if (state.unit === 'oz')     return 'oz';
     return 'ml';
   }
+  function renderSizeControl() {
+    const row = $('waterSizeRow');
+    if (state.unit !== 'bottle' && state.unit !== 'glass') {
+      row.style.display = 'none';
+      return;
+    }
+    row.style.display = '';
+    $('waterSizeLabel').textContent = state.unit === 'bottle' ? 'Bottle size' : 'Glass size';
+    const input = $('waterSizeMl');
+    if (document.activeElement !== input) {
+      input.value = state.unit === 'bottle' ? (state.bottleMl || 500) : (state.glassMl || 250);
+    }
+  }
+  $('waterSizeMl').addEventListener('input', () => {
+    const v = parseFloat($('waterSizeMl').value);
+    if (!v || v <= 0) return;
+    if (state.unit === 'bottle') state.bottleMl = v;
+    else state.glassMl = v;
+    saveState();
+    renderWater();
+  });
+
   function fmtMl(ml) {
     if (ml >= 1000) return (ml / 1000).toFixed(1) + ' L';
     return Math.round(ml) + ' ml';
@@ -858,6 +925,8 @@ html, body {
     $('waterTarget').textContent = '/ ' + targetUnits;
     $('waterPlusLabel').textContent = 'Drank a ' + unitLabelSingular();
 
+    renderSizeControl();
+
     // Progress bar with three zones: low (0-65%), healthy (65-100%), over (100-150%)
     const pctRaw = (count / targetUnits) * 100;
     const fillPct = Math.min(150, pctRaw) / 1.5;   // bar represents 0-150%
@@ -874,7 +943,7 @@ html, body {
     const helper = $('waterHelper');
     if (count === 0) { helper.textContent = 'Start the day — first one in.'; helper.classList.remove('good'); }
     else if (pctRaw < 50) { helper.textContent = 'Behind pace — drink one in the next hour.'; helper.classList.remove('good'); }
-    else if (pctRaw < 100) { helper.textContent = (targetUnits - count) + ' to go. Pacing well.'; helper.classList.remove('good'); }
+    else if (pctRaw < 100) { helper.textContent = fmtCount(targetUnits - count) + ' to go. Pacing well.'; helper.classList.remove('good'); }
     else if (pctRaw < 130) { helper.textContent = '✓ Target hit — top up if you train this evening.'; helper.classList.add('good'); }
     else { helper.textContent = 'Strong — way past target.'; helper.classList.add('good'); }
 

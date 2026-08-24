@@ -417,19 +417,19 @@ body.topbar-modal-open {
 
   // -------- Mobile lockdown helpers --------
   // Belt-and-suspenders zoom prevention — iOS Safari sometimes ignores
-  // user-scalable=no, so we also kill the gesture events directly.
+  // user-scalable=no, so we also kill pinch gesture events directly.
+  // (Double-tap-to-zoom is already prevented by `touch-action: pan-y`
+  // above — a global touchend-based JS version of that used to live here
+  // too, but comparing every tap's timestamp against the previous tap
+  // anywhere on the page — not the same element — ends up preventDefault-ing
+  // (and so silently dropping) any tap that happens within 300ms of an
+  // unrelated previous tap, which is what made taps feel like they needed
+  // a second try across the whole site.)
   function blockGesture(e) { e.preventDefault(); }
   function lockGestures() {
     document.addEventListener('gesturestart', blockGesture, { passive: false });
     document.addEventListener('gesturechange', blockGesture, { passive: false });
     document.addEventListener('gestureend', blockGesture, { passive: false });
-    // Also kill the iOS double-tap-to-zoom on any tap.
-    let lastTouch = 0;
-    document.addEventListener('touchend', (e) => {
-      const now = Date.now();
-      if (now - lastTouch <= 300) e.preventDefault();
-      lastTouch = now;
-    }, { passive: false });
   }
 
   // Watch every known modal-bg / overlay class — when any one of them

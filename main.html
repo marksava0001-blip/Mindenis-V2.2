@@ -693,6 +693,18 @@ body::after {
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-title">Long-Term To-Do</div>
+    <div class="gm-card">
+      <ul id="longtermList" class="goal-list gm-list"></ul>
+      <div id="longtermEmpty" class="empty-state">Nothing here yet — add something below. This list never resets.</div>
+      <div class="goal-input-wrap gm-input-wrap">
+        <input id="longtermInput" class="gm-input" type="text" placeholder="Add a long-term to-do…" autocomplete="off">
+        <button type="button" id="longtermAddBtn" class="gm-add">+ Add</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1190,6 +1202,84 @@ body::after {
     renderListInto(goals, document.getElementById('tomorrowList'), document.getElementById('tomorrowEmpty'), tomorrowKey(), true);
   }
 
+  // ---------- Long-Term To-Do (persistent — never rolls over or resets) ----------
+  const LONGTERM_KEY = 'longterm_todos_v1';
+  function getLongterm() {
+    const g = storeGet(LONGTERM_KEY);
+    return Array.isArray(g) ? g : [];
+  }
+  function setLongterm(list) { storeSet(LONGTERM_KEY, list); }
+
+  function buildLongtermRow(item, idx, reload) {
+    const li = document.createElement('li');
+    li.className = 'gm-row';
+    li.dataset.idx = String(idx);
+    if (item.done) li.classList.add('gm-row-done');
+
+    const handle = document.createElement('span');
+    handle.className = 'gm-handle';
+    handle.textContent = '⋮⋮';
+    li.appendChild(handle);
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'gm-check';
+    cb.checked = !!item.done;
+    cb.addEventListener('change', () => {
+      const list = getLongterm();
+      if (!list[idx]) return;
+      list[idx].done = cb.checked;
+      setLongterm(list);
+      reload();
+    });
+    li.appendChild(cb);
+
+    const text = document.createElement('span');
+    text.className = 'gm-text';
+    text.textContent = item.text;
+    li.appendChild(text);
+    makeInlineEdit(text, null, idx, LONGTERM_KEY, reload);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'goal-delete';
+    del.setAttribute('aria-label', 'Delete item');
+    del.textContent = '×';
+    del.addEventListener('click', () => {
+      const list = getLongterm();
+      list.splice(idx, 1);
+      setLongterm(list);
+      reload();
+    });
+    li.appendChild(del);
+
+    wireDragReorder(li, null, LONGTERM_KEY, reload);
+    return li;
+  }
+
+  function renderLongterm() {
+    const list = getLongterm();
+    const listEl = document.getElementById('longtermList');
+    const emptyEl = document.getElementById('longtermEmpty');
+    listEl.innerHTML = '';
+    emptyEl.style.display = list.length === 0 ? 'block' : 'none';
+    list.forEach((item, i) => listEl.appendChild(buildLongtermRow(item, i, renderLongterm)));
+  }
+
+  document.getElementById('longtermAddBtn').addEventListener('click', () => {
+    const input = document.getElementById('longtermInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const list = getLongterm();
+    list.push({ text, done: false });
+    setLongterm(list);
+    input.value = '';
+    renderLongterm();
+  });
+  document.getElementById('longtermInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('longtermAddBtn').click(); }
+  });
+
   // ---------- Push remaining ----------
   document.getElementById('gmPushBtn').addEventListener('click', () => {
     const today    = getGoals(todayKey());
@@ -1301,13 +1391,14 @@ body::after {
   loadToday();
   loadTomorrow();
   renderStreak();
+  renderLongterm();
   updateDayRing();
   setInterval(updateDayRing, 60 * 1000);
   startTicker();
 
   // Re-render when storage changes from another tab (or our bridged parent).
   window.addEventListener('storage', () => {
-    loadToday(); loadTomorrow(); renderStreak();
+    loadToday(); loadTomorrow(); renderStreak(); renderLongterm();
   });
 })();
 </script>
@@ -1318,6 +1409,7 @@ document.addEventListener('DOMContentLoaded', function () {
   initCloudSync({
     appKey: 'goals',
     syncedPrefixes: ['goals:'],
+    syncedKeys: ['longterm_todos_v1'],
     onApplied: function () {
       window.dispatchEvent(new CustomEvent('goals-changed'));
       window.dispatchEvent(new Event('storage'));

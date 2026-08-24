@@ -33,8 +33,12 @@
     if (badgeEl || !document.body) return badgeEl;
     badgeEl = document.createElement('div');
     badgeEl.id = '__syncBadge';
+    // z-index 90: above the sticky topbar (40) and normal page content, but
+    // below every full-screen sheet/modal in the app (100+) — so an open
+    // sheet naturally covers the badge instead of the badge floating on
+    // top of the sheet's own close button.
     badgeEl.style.cssText = 'position:fixed;top:calc(env(safe-area-inset-top,0px) + 6px);left:8px;' +
-      'z-index:9999;font:600 10.5px -apple-system,BlinkMacSystemFont,sans-serif;letter-spacing:0.02em;' +
+      'z-index:90;font:600 10.5px -apple-system,BlinkMacSystemFont,sans-serif;letter-spacing:0.02em;' +
       'padding:5px 9px;border-radius:999px;background:rgba(20,20,22,0.75);color:#fff;cursor:pointer;' +
       'backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.14);display:flex;align-items:center;gap:5px;';
     badgeEl.innerHTML = '<span class="__syncDot" style="width:6px;height:6px;border-radius:50%;background:#F2C063;flex-shrink:0;"></span><span class="__syncText">syncing…</span>';

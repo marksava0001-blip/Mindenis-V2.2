@@ -102,6 +102,21 @@ body::after {
   transition: transform 0.08s ease;
 }
 
+/* ===== Drag-to-reorder (press and hold a tile) ===== */
+.tile.tile-dragging {
+  z-index: 50;
+  cursor: grabbing;
+  box-shadow: 0 26px 64px rgba(0,0,0,0.6);
+  transition: none !important;
+  /* So elementFromPoint (used to detect which tile is under the pointer)
+     sees the tile underneath instead of hitting the dragged tile itself,
+     which is now visually sitting right on top of it. */
+  pointer-events: none;
+}
+.tile.tile-settling {
+  transition: transform 0.22s cubic-bezier(0.22,1,0.36,1) !important;
+}
+
 /* Tile sizes */
 .tile.big  { grid-column: span 2; grid-row: span 2; }
 .tile.wide { grid-column: span 2; }
@@ -586,6 +601,140 @@ body::after {
     if (!t || !t.access) { window.location.href = 'health.html'; return; }
     $('whAction').textContent = 'Syncing…'; syncWhoop();
   });
+})();
+</script>
+
+<!-- ===== Drag-to-reorder: press and hold a tile to rearrange the grid ===== -->
+<script>
+(function () {
+  'use strict';
+  const bento = document.querySelector('.bento');
+  if (!bento) return;
+  const tiles = Array.from(bento.querySelectorAll('.tile'));
+  tiles.forEach((t) => { t.dataset.key = t.getAttribute('href'); });
+
+  const ORDER_KEY = 'hub_tile_order_v1';
+  function loadOrder() {
+    try { return JSON.parse(localStorage.getItem(ORDER_KEY)) || null; } catch (e) { return null; }
+  }
+  function saveOrder(order) { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); }
+
+  function applyOrder(order) {
+    if (!Array.isArray(order)) return;
+    order.forEach((key, i) => {
+      const t = tiles.find((x) => x.dataset.key === key);
+      if (t) t.style.order = i;
+    });
+    let next = order.length;
+    tiles.forEach((t) => { if (order.indexOf(t.dataset.key) === -1) t.style.order = next++; });
+  }
+  function currentOrderKeys() {
+    return tiles.slice()
+      .sort((a, b) => (parseInt(a.style.order, 10) || 0) - (parseInt(b.style.order, 10) || 0))
+      .map((t) => t.dataset.key);
+  }
+  // Every tile needs a real inline `order` value from the start (not just
+  // the CSS default), otherwise the first drag's swap has nothing to swap —
+  // exchanging two unset values is a no-op.
+  tiles.forEach((t, i) => { t.style.order = i; });
+  applyOrder(loadOrder());
+
+  const LONG_PRESS_MS = 450;
+  const MOVE_CANCEL_PX = 10;
+  let pressTimer = null;
+  let dragging = null;
+  let didDrag = false;
+  let startX = 0, startY = 0;
+  let lastOverKey = null;
+
+  function beginDrag(tile, pointerId) {
+    dragging = tile;
+    didDrag = true;
+    tile.classList.remove('tile-settling');
+    tile.classList.add('tile-dragging');
+    lastOverKey = tile.dataset.key;
+    try { tile.setPointerCapture(pointerId); } catch (e) {}
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+  }
+
+  function swapOrder(a, b) {
+    const before = new Map(tiles.map((t) => [t, t.getBoundingClientRect()]));
+    const ao = a.style.order, bo = b.style.order;
+    a.style.order = bo;
+    b.style.order = ao;
+    void bento.offsetHeight; // force reflow so the rects below reflect the new layout
+    tiles.forEach((t) => {
+      if (t === a) return; // the dragged tile is positioned by the pointer, not layout
+      const from = before.get(t);
+      const to = t.getBoundingClientRect();
+      const dx = from.left - to.left, dy = from.top - to.top;
+      if (!dx && !dy) return;
+      t.style.transition = 'none';
+      t.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      requestAnimationFrame(() => {
+        t.classList.add('tile-settling');
+        t.style.transform = '';
+      });
+    });
+  }
+
+  tiles.forEach((tile) => {
+    tile.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      startX = e.clientX; startY = e.clientY;
+      clearTimeout(pressTimer);
+      const pointerId = e.pointerId;
+      pressTimer = setTimeout(() => beginDrag(tile, pointerId), LONG_PRESS_MS);
+    });
+    tile.addEventListener('pointermove', (e) => {
+      if (!dragging) {
+        if (Math.abs(e.clientX - startX) > MOVE_CANCEL_PX || Math.abs(e.clientY - startY) > MOVE_CANCEL_PX) {
+          clearTimeout(pressTimer);
+        }
+        return;
+      }
+      if (dragging !== tile) return;
+      e.preventDefault();
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      dragging.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.06)';
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const over = el && el.closest('.tile');
+      const overKey = over && over.dataset.key;
+      if (over && over !== dragging && bento.contains(over) && overKey !== lastOverKey) {
+        lastOverKey = overKey;
+        swapOrder(dragging, over);
+      }
+    }, { passive: false });
+    tile.addEventListener('pointerup', (e) => {
+      clearTimeout(pressTimer);
+      if (dragging !== tile) return;
+      try { tile.releasePointerCapture(e.pointerId); } catch (err) {}
+      tile.classList.remove('tile-dragging');
+      tile.classList.add('tile-settling');
+      tile.style.transform = '';
+      dragging = null;
+      saveOrder(currentOrderKeys());
+    });
+    tile.addEventListener('pointercancel', () => {
+      clearTimeout(pressTimer);
+      if (dragging !== tile) return;
+      tile.classList.remove('tile-dragging');
+      tile.classList.add('tile-settling');
+      tile.style.transform = '';
+      dragging = null;
+    });
+    tile.addEventListener('click', (e) => {
+      if (didDrag) { e.preventDefault(); e.stopPropagation(); didDrag = false; }
+    });
+  });
+
+  if (window.initCloudSync) {
+    window.initCloudSync({
+      appKey: 'hub_tiles',
+      syncedKeys: [ORDER_KEY],
+      onApplied: function () { applyOrder(loadOrder()); }
+    });
+  }
 })();
 </script>
 </body>

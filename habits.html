@@ -378,9 +378,11 @@ body::after {
   function loadState() {
     try {
       const raw = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (raw && Array.isArray(raw.habits)) return { habits: raw.habits, log: raw.log || {} };
+      if (raw && Array.isArray(raw.habits)) {
+        return { habits: raw.habits, log: raw.log || {}, deletedIds: (raw.deletedIds && typeof raw.deletedIds === 'object') ? raw.deletedIds : {} };
+      }
     } catch (e) {}
-    return { habits: [], log: {} };
+    return { habits: [], log: {}, deletedIds: {} };
   }
   function saveState(s) { localStorage.setItem(STORE_KEY, JSON.stringify(s)); }
   let state = loadState();
@@ -396,18 +398,27 @@ body::after {
     if (!local || !Array.isArray(local.habits)) return remoteRaw;
     if (!remote || !Array.isArray(remote.habits)) return localRaw;
 
+    // Deletions are tombstoned (id -> deletedAt) instead of just being
+    // absent, so a plain union-by-id merge can't resurrect a habit that
+    // was deleted on this device but still exists in whatever the other
+    // device/remote last pushed.
+    const mergedDeletedIds = Object.assign({}, remote.deletedIds || {}, local.deletedIds || {});
+
     const byId = {};
     remote.habits.forEach(function (h) { byId[h.id] = h; });
     local.habits.forEach(function (h) { if (!byId[h.id]) byId[h.id] = h; });
-    const mergedHabits = Object.keys(byId).map(function (id) { return byId[id]; });
+    const mergedHabits = Object.keys(byId)
+      .filter(function (id) { return !mergedDeletedIds[id]; })
+      .map(function (id) { return byId[id]; });
 
     const mergedLog = {};
     const allHabitIds = new Set(Object.keys(remote.log || {}).concat(Object.keys(local.log || {})));
     allHabitIds.forEach(function (id) {
+      if (mergedDeletedIds[id]) return;
       mergedLog[id] = Object.assign({}, (local.log || {})[id] || {}, (remote.log || {})[id] || {});
     });
 
-    return JSON.stringify({ habits: mergedHabits, log: mergedLog });
+    return JSON.stringify({ habits: mergedHabits, log: mergedLog, deletedIds: mergedDeletedIds });
   }
 
   // --- helpers ---------------------------------------------------------
@@ -715,6 +726,8 @@ body::after {
     if (!confirm('Delete this habit? This cannot be undone.')) return;
     state.habits = state.habits.filter(function (h) { return h.id !== editingId; });
     delete state.log[editingId];
+    state.deletedIds = state.deletedIds || {};
+    state.deletedIds[editingId] = Date.now();
     saveState(state);
     closeSheet('editView');
     closeSheet('detailView');

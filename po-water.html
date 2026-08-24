@@ -221,6 +221,50 @@ html, body {
 }
 .water-helper.good { color: var(--good); font-style: normal; }
 
+/* ----- Custom ml logging ----- */
+.water-custom {
+  margin-top: 16px; padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.water-custom-label {
+  font-size: 10px; letter-spacing: 0.16em; font-weight: 700;
+  color: var(--text-3); margin-bottom: 8px; text-transform: uppercase;
+}
+.water-custom-row { display: flex; gap: 8px; }
+.water-custom-input {
+  flex: 1; min-width: 0;
+  background: rgba(0,0,0,0.28);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  font-family: inherit; font-size: 16px;
+  padding: 10px 12px; border-radius: 10px; outline: none;
+  -moz-appearance: textfield;
+}
+.water-custom-input::-webkit-outer-spin-button,
+.water-custom-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.water-custom-input:focus { border-color: rgba(110,231,183,0.40); box-shadow: 0 0 0 2px rgba(110,231,183,0.10); }
+.water-custom-add {
+  flex-shrink: 0; padding: 10px 18px;
+  border: none; border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #e8e5dd 100%);
+  color: #0a0a0b; font-family: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.water-custom-add:active { transform: scale(0.97); }
+.water-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.water-chip {
+  padding: 7px 12px; border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.water-chip:hover { background: rgba(255,255,255,0.08); color: var(--text-1); }
+.water-chip:active { transform: scale(0.95); }
+
 /* ----- Why this target? collapsible ----- */
 .why-toggle {
   width: 100%; display: flex; align-items: center; justify-content: space-between;
@@ -506,6 +550,21 @@ html, body {
     </div>
     <div class="water-helper" id="waterHelper">Start the day — first one in.</div>
 
+    <div class="water-custom">
+      <div class="water-custom-label">Log a custom amount</div>
+      <div class="water-custom-row">
+        <input type="number" class="water-custom-input" id="waterCustomMl" placeholder="ml" min="0" step="10" inputmode="numeric">
+        <button class="water-custom-add" id="waterCustomAdd" type="button">Add</button>
+      </div>
+      <div class="water-chips" id="waterChips">
+        <button class="water-chip" type="button" data-ml="100">100 ml</button>
+        <button class="water-chip" type="button" data-ml="250">250 ml</button>
+        <button class="water-chip" type="button" data-ml="350">350 ml</button>
+        <button class="water-chip" type="button" data-ml="500">500 ml</button>
+        <button class="water-chip" type="button" data-ml="750">750 ml</button>
+      </div>
+    </div>
+
     <button class="why-toggle" id="whyToggle" type="button" aria-expanded="false">
       <span>Why this target?</span>
       <span class="why-arrow">▾</span>
@@ -773,6 +832,10 @@ html, body {
     if (ml >= 1000) return (ml / 1000).toFixed(1) + ' L';
     return Math.round(ml) + ' ml';
   }
+  function fmtCount(n) {
+    const rounded = Math.round(n * 10) / 10;
+    return (rounded % 1 === 0) ? String(rounded) : rounded.toFixed(1);
+  }
 
   // ============================================================
   // RENDER
@@ -791,7 +854,7 @@ html, body {
     const unitName = unitLabelPlural();
 
     $('waterUnitLabel').textContent = unitName.toUpperCase() + ' DRANK TODAY';
-    $('waterNum').textContent = count;
+    $('waterNum').textContent = fmtCount(count);
     $('waterTarget').textContent = '/ ' + targetUnits;
     $('waterPlusLabel').textContent = 'Drank a ' + unitLabelSingular();
 
@@ -910,6 +973,28 @@ html, body {
   $('waterMinusBtn').addEventListener('click', () => {
     setTodayCount(Math.max(0, todayCount() - 1));
     renderWater();
+  });
+
+  function addMl(ml) {
+    if (!ml || ml <= 0) return;
+    setTodayCount(todayCount() + ml / unitVolMl());
+    renderWater();
+    const btn = $('waterCustomAdd');
+    btn.style.transform = 'scale(0.95)';
+    setTimeout(() => { btn.style.transform = ''; }, 120);
+  }
+  $('waterCustomAdd').addEventListener('click', () => {
+    const input = $('waterCustomMl');
+    addMl(parseFloat(input.value));
+    input.value = '';
+  });
+  $('waterCustomMl').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { $('waterCustomAdd').click(); }
+  });
+  $('waterChips').addEventListener('click', (e) => {
+    const chip = e.target.closest('.water-chip');
+    if (!chip) return;
+    addMl(parseFloat(chip.dataset.ml));
   });
 
   $('whyToggle').addEventListener('click', () => {
@@ -1091,6 +1176,15 @@ html, body {
   function escape(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+
+  // Re-read state and re-render whenever localStorage changes from another
+  // frame/tab — e.g. the Metrics editor in the parent health.html page, or
+  // a cloud-sync pull landing while this page is already open.
+  window.addEventListener('storage', () => {
+    state = loadState();
+    renderSettings();
+    renderAll();
+  });
 
   // BOOT
   renderAll();

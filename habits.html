@@ -255,9 +255,7 @@ body::after {
     </button>
   </div>
 
-  <div class="section">
-    <div id="habitList"></div>
-  </div>
+  <div id="habitList"></div>
 
 </div><!-- /.page -->
 
@@ -341,6 +339,15 @@ body::after {
     <div class="field-block">
       <label class="field-label">Color</label>
       <div class="color-grid" id="colorGrid"></div>
+    </div>
+
+    <div class="field-block">
+      <label class="field-label">Time of Day</label>
+      <div class="seg" id="timeSeg" style="width:100%; display:flex;">
+        <button type="button" data-tod="morning" style="flex:1;">Morning</button>
+        <button type="button" data-tod="afternoon" style="flex:1;">Afternoon</button>
+        <button type="button" data-tod="evening" style="flex:1;">Evening</button>
+      </div>
     </div>
 
     <div class="field-block">
@@ -502,39 +509,58 @@ body::after {
   }
 
   // --- list view -------------------------------------------------------
+  const TIME_GROUPS = [
+    { key: 'morning', label: 'Morning' },
+    { key: 'afternoon', label: 'Afternoon' },
+    { key: 'evening', label: 'Evening' }
+  ];
+
+  function buildHabitCard(h) {
+    const today = fmt(new Date());
+    const log = state.log[h.id] || {};
+    const dateSet = new Set(Object.keys(log));
+    const doneToday = !!log[today];
+    const card = document.createElement('div');
+    card.className = 'habit-card';
+    card.style.setProperty('--hcolor', h.color);
+    card.innerHTML =
+      '<div class="habit-top">' +
+        '<div class="habit-icon">' + h.icon + '</div>' +
+        '<div class="habit-info">' +
+          '<div class="habit-name">' + escapeHtml(h.name) + '</div>' +
+          '<div class="habit-desc">' + escapeHtml(h.description || '') + '</div>' +
+        '</div>' +
+        '<button class="habit-check' + (doneToday ? ' on' : '') + '" type="button" aria-label="Mark done today">' +
+          (doneToday ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#0A0A0B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
+        '</button>' +
+      '</div>' +
+      '<div class="heat-mini">' + buildMiniHeat(dateSet, h.color) + '</div>';
+    card.querySelector('.habit-check').addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleToday(h.id);
+    });
+    card.addEventListener('click', function () { openDetail(h.id); });
+    return card;
+  }
+
   function renderList() {
     const wrap = $('habitList');
+    wrap.innerHTML = '';
     if (state.habits.length === 0) {
       wrap.innerHTML = '<div class="empty-state">No habits yet — tap + to add your first one.</div>';
       return;
     }
-    const today = fmt(new Date());
-    wrap.innerHTML = '';
-    state.habits.forEach(function (h) {
-      const log = state.log[h.id] || {};
-      const dateSet = new Set(Object.keys(log));
-      const doneToday = !!log[today];
-      const card = document.createElement('div');
-      card.className = 'habit-card';
-      card.style.setProperty('--hcolor', h.color);
-      card.innerHTML =
-        '<div class="habit-top">' +
-          '<div class="habit-icon">' + h.icon + '</div>' +
-          '<div class="habit-info">' +
-            '<div class="habit-name">' + escapeHtml(h.name) + '</div>' +
-            '<div class="habit-desc">' + escapeHtml(h.description || '') + '</div>' +
-          '</div>' +
-          '<button class="habit-check' + (doneToday ? ' on' : '') + '" type="button" aria-label="Mark done today">' +
-            (doneToday ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#0A0A0B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '') +
-          '</button>' +
-        '</div>' +
-        '<div class="heat-mini">' + buildMiniHeat(dateSet, h.color) + '</div>';
-      card.querySelector('.habit-check').addEventListener('click', function (e) {
-        e.stopPropagation();
-        toggleToday(h.id);
-      });
-      card.addEventListener('click', function () { openDetail(h.id); });
-      wrap.appendChild(card);
+    TIME_GROUPS.forEach(function (group) {
+      const habits = state.habits.filter(function (h) { return (h.timeOfDay || 'morning') === group.key; });
+      if (habits.length === 0) return;
+      const section = document.createElement('div');
+      section.className = 'section';
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = group.label;
+      section.appendChild(title);
+      habits.forEach(function (h) { section.appendChild(buildHabitCard(h)); });
+      wrap.appendChild(section);
     });
   }
 
@@ -600,7 +626,7 @@ body::after {
 
   // --- add / edit sheet -------------------------------------------------------
   let editingId = null;
-  let editIcon = ICONS[0], editColorVal = COLORS[0], editType = 'build';
+  let editIcon = ICONS[0], editColorVal = COLORS[0], editType = 'build', editTimeOfDay = 'morning';
 
   function populateEditor() {
     $('iconGrid').innerHTML = ICONS.map(function (ic) {
@@ -632,13 +658,21 @@ body::after {
         $('typeSeg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
       };
     });
+
+    $('timeSeg').querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.tod === editTimeOfDay);
+      b.onclick = function () {
+        editTimeOfDay = b.dataset.tod;
+        $('timeSeg').querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      };
+    });
   }
 
   function openAddEditor() {
     editingId = null;
     $('editHeading').textContent = 'Add Habit';
     $('editDelete').style.display = 'none';
-    editIcon = ICONS[0]; editColorVal = COLORS[0]; editType = 'build';
+    editIcon = ICONS[0]; editColorVal = COLORS[0]; editType = 'build'; editTimeOfDay = 'morning';
     $('editName').value = ''; $('editDesc').value = '';
     populateEditor();
     openSheet('editView');
@@ -647,7 +681,7 @@ body::after {
     editingId = h.id;
     $('editHeading').textContent = 'Edit Habit';
     $('editDelete').style.display = '';
-    editIcon = h.icon; editColorVal = h.color; editType = h.type;
+    editIcon = h.icon; editColorVal = h.color; editType = h.type; editTimeOfDay = h.timeOfDay || 'morning';
     $('editName').value = h.name; $('editDesc').value = h.description || '';
     populateEditor();
     openSheet('editView');
@@ -662,11 +696,11 @@ body::after {
     const desc = $('editDesc').value.trim();
     if (editingId) {
       const h = state.habits.find(function (x) { return x.id === editingId; });
-      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType });
+      Object.assign(h, { name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay });
     } else {
       state.habits.push({
         id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        name: name, description: desc, icon: editIcon, color: editColorVal, type: editType,
+        name: name, description: desc, icon: editIcon, color: editColorVal, type: editType, timeOfDay: editTimeOfDay,
         createdAt: fmt(new Date())
       });
     }

@@ -198,6 +198,13 @@
     // mechanism — it does NOT depend on the realtime websocket, only on
     // plain REST, so it works even on networks that block websockets.
     async function pullLatest(showBadgeOnError, isRetry) {
+      // Snapshot local state before the (possibly slow) network round-trip.
+      // If the user changes something locally WHILE this request is in
+      // flight (e.g. drops a dragged tile right as a pull happens to be
+      // out), the response below is now stale — applying it would silently
+      // overwrite the fresher local change with older data. Push the local
+      // change instead of applying the response in that case.
+      const localBefore = JSON.stringify(collect());
       try {
         const { data, error } = await supa
           .from('app_state').select('data').eq('key', appKey).maybeSingle();
@@ -206,7 +213,10 @@
           if (showBadgeOnError) setBadge(appKey, 'error', 'read failed: ' + (error.message || JSON.stringify(error)));
           return;
         }
-        if (data && data.data && Object.keys(data.data).length > 0) {
+        const localNow = JSON.stringify(collect());
+        if (localNow !== localBefore) {
+          schedulePush();
+        } else if (data && data.data && Object.keys(data.data).length > 0) {
           const incoming = JSON.stringify(data.data);
           if (incoming !== lastSyncedJson) { lastSyncedJson = incoming; applyRemote(data.data); }
         } else if (Object.keys(collect()).length > 0) {

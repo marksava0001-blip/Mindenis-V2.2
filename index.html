@@ -80,6 +80,12 @@ body::after {
   -webkit-backdrop-filter: blur(24px) saturate(1.2);
   box-shadow: 0 12px 40px rgba(0,0,0,0.45);
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  /* Tiles are <a> links — without these, iOS Safari's own "hold a link"
+     gesture (link preview / copy-link callout) and text selection fight
+     the custom long-press-to-reorder drag below, especially right around
+     drop time. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none; user-select: none;
 }
 /* The "its own style" bit — a faint accent glow per tile. */
 .tile::before {
@@ -705,7 +711,11 @@ body::after {
         swapOrder(dragging, over);
       }
     }, { passive: false });
-    tile.addEventListener('pointerup', (e) => {
+    // pointerup (a clean drop) and pointercancel (iOS commonly fires this
+    // instead of pointerup for a custom drag on a link — e.g. if its own
+    // touch-callout gesture briefly contends for the same touch) both end
+    // the drag the same way: keep whatever order resulted, don't discard it.
+    function finishDrag(e) {
       clearTimeout(pressTimer);
       if (dragging !== tile) return;
       try { tile.releasePointerCapture(e.pointerId); } catch (err) {}
@@ -713,16 +723,12 @@ body::after {
       tile.classList.add('tile-settling');
       tile.style.transform = '';
       dragging = null;
+      lastOverKey = null;
       saveOrder(currentOrderKeys());
-    });
-    tile.addEventListener('pointercancel', () => {
-      clearTimeout(pressTimer);
-      if (dragging !== tile) return;
-      tile.classList.remove('tile-dragging');
-      tile.classList.add('tile-settling');
-      tile.style.transform = '';
-      dragging = null;
-    });
+    }
+    tile.addEventListener('pointerup', finishDrag);
+    tile.addEventListener('pointercancel', finishDrag);
+    tile.addEventListener('lostpointercapture', (e) => { if (dragging === tile) finishDrag(e); });
     tile.addEventListener('click', (e) => {
       if (didDrag) { e.preventDefault(); e.stopPropagation(); didDrag = false; }
     });
@@ -732,7 +738,7 @@ body::after {
     window.initCloudSync({
       appKey: 'hub_tiles',
       syncedKeys: [ORDER_KEY],
-      onApplied: function () { applyOrder(loadOrder()); }
+      onApplied: function () { if (!dragging) applyOrder(loadOrder()); }
     });
   }
 })();

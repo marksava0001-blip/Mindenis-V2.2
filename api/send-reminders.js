@@ -163,11 +163,14 @@ export default async function handler(req, res) {
       'reminder_log?select=habit_id,time&date=eq.' + encodeURIComponent(today),
       { method: 'GET' }
     );
-    const alreadySent = new Set();
-    if (logCheck.ok) {
-      const rows = await logCheck.json();
-      rows.forEach((r) => alreadySent.add(r.habit_id + '|' + r.time));
+    if (!logCheck.ok) {
+      // Fail closed, not open — if we can't verify what's already been
+      // sent, sending anyway risks re-firing the same reminder on every
+      // cron tick for the whole DUE_WINDOW_MINUTES instead of once.
+      return res.status(500).json({ error: 'reminder_log read failed — has the migration in SETUP.md (adding the "time" column) been run? ' + (await logCheck.text()) });
     }
+    const alreadySent = new Set();
+    (await logCheck.json()).forEach((r) => alreadySent.add(r.habit_id + '|' + r.time));
     const toSend = dueEntries.filter((e) => !alreadySent.has(e.habit.id + '|' + e.time));
     if (!toSend.length) {
       return res.status(200).json({ ok: true, due: dueEntries.length, sent: 0, note: 'all already sent today' });

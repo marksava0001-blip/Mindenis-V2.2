@@ -877,6 +877,15 @@ html, body { scrollbar-width: none; -ms-overflow-style: none; }
   font-family: inherit; line-height: 1;
 }
 .ord-card-x:hover { color: #FF8A8A; }
+.ord-card-edit {
+  background: transparent; border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-tertiary);
+  cursor: pointer; font-size: 12px;
+  padding: 4px 8px; border-radius: 6px;
+  font-family: inherit; line-height: 1;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.ord-card-edit:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
 .ord-card-meta {
   display: flex; flex-wrap: wrap; gap: 10px;
   margin-top: 8px;
@@ -3170,6 +3179,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
           '<div class="ord-card-h">'
         +   '<div class="ord-card-name">' + escapeHtml(o.name) + '</div>'
         +   '<div class="ord-card-amt">' + fmtMoney(cost) + '</div>'
+        +   '<button class="ord-card-edit" data-edit-id="' + o.id + '" aria-label="Edit">✎ Edit</button>'
         +   '<button class="ord-card-x" data-id="' + o.id + '" aria-label="Remove">×</button>'
         + '</div>'
         + '<div class="ord-card-meta">'
@@ -3184,7 +3194,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       });
       list.appendChild(row);
     });
-    // Wire up delete (×), deduct, and undo buttons.
+    // Wire up edit, delete (×), deduct, and undo buttons.
+    list.querySelectorAll('.ord-card-edit').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openOrderEdit(b.dataset.editId);
+      });
+    });
     list.querySelectorAll('.ord-card-x').forEach(b => {
       b.addEventListener('click', () => {
         const id = b.dataset.id;

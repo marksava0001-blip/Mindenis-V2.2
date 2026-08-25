@@ -3099,6 +3099,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     }).join('');
     if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
   }
+  // Recorded whenever an order is deleted, so a sync pull that still has
+  // the old copy (or the Gmail-scan cron's own read-modify-write) can't
+  // silently bring it back — see the mergeOrdersState function wired into
+  // initCloudSync near the bottom of this file.
+  function markOrderDeleted(id) {
+    const deleted = storeGet('incoming_orders_deleted') || {};
+    deleted[id] = Date.now();
+    storeSet('incoming_orders_deleted', deleted);
+  }
+
   function renderOrders() {
     const list = document.getElementById('ordList');
     const empty = document.getElementById('ordEmpty');
@@ -3180,6 +3190,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         const id = b.dataset.id;
         const arr = (storeGet('incoming_orders') || []).filter(x => x.id !== id);
         storeSet('incoming_orders', arr);
+        markOrderDeleted(id);
         renderOrders();
       });
     });
@@ -3262,6 +3273,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       carrier: document.getElementById('oeCarrier').value.trim() || null,
       trackingNumber: document.getElementById('oeTracking').value.trim() || null,
       date: document.getElementById('oeDate').value || null,
+      updatedAt: Date.now(),
     };
     storeSet('incoming_orders', arr);
     closeOrderEdit();
@@ -3272,6 +3284,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     if (!confirm('Delete this order?')) return;
     const arr = (storeGet('incoming_orders') || []).filter(x => x.id !== editingOrderId);
     storeSet('incoming_orders', arr);
+    markOrderDeleted(editingOrderId);
     closeOrderEdit();
     renderAllNetWorth();
   });
@@ -3349,7 +3362,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       ...order,
       deductedAt: Date.now(),
       pctAtDeduction: pctAtDeduction,
-      deductedFrom: { cat: catKey, name: items[itemIdx].name }
+      deductedFrom: { cat: catKey, name: items[itemIdx].name },
+      updatedAt: Date.now()
     };
     storeSet('incoming_orders', orders);
     renderAllNetWorth();   // re-paints NW totals, donut, activity, and orders
@@ -3368,7 +3382,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       storeSet('nw:' + order.deductedFrom.cat, items);
       logActivity(order.deductedFrom.cat, items[itemIdx].name, cost, 'edit');
     }
-    orders[oIdx] = { ...order, deductedAt: null, pctAtDeduction: null, deductedFrom: null };
+    orders[oIdx] = { ...order, deductedAt: null, pctAtDeduction: null, deductedFrom: null, updatedAt: Date.now() };
     storeSet('incoming_orders', orders);
     renderAllNetWorth();
   }
@@ -3594,10 +3608,47 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   if (typeof initCloudSync !== 'function') return;
+
+  // incoming_orders had no merge protection — a background sync pull (every
+  // 20s) or the Gmail-scan cron (every 20 min, which does its own
+  // read-append-write against this same array server-side) could silently
+  // clobber an edit made moments earlier with a stale snapshot. Union by id,
+  // keep whichever copy is newer (updatedAt, falling back to ts for orders
+  // that predate that field), and respect delete tombstones so a deleted
+  // order can't get resurrected by an untimely pull either.
+  function mergeOrdersState(localRaw, remoteRaw) {
+    let local, remote;
+    try { local = JSON.parse(localRaw); } catch (e) { local = null; }
+    try { remote = JSON.parse(remoteRaw); } catch (e) { remote = null; }
+    if (!Array.isArray(local)) return remoteRaw;
+    if (!Array.isArray(remote)) return localRaw;
+    let deletedIds = {};
+    try { deletedIds = JSON.parse(localStorage.getItem('incoming_orders_deleted')) || {}; } catch (e) {}
+    const byId = {};
+    function consider(o) {
+      if (!o || !o.id) return;
+      const existing = byId[o.id];
+      const freshness = (o) => (o.updatedAt || o.ts || 0);
+      if (!existing || freshness(o) >= freshness(existing)) byId[o.id] = o;
+    }
+    remote.forEach(consider);
+    local.forEach(consider);
+    const merged = Object.keys(byId).filter((id) => !deletedIds[id]).map((id) => byId[id]);
+    return JSON.stringify(merged);
+  }
+  function mergeDeletedOrderIds(localRaw, remoteRaw) {
+    let local, remote;
+    try { local = JSON.parse(localRaw); } catch (e) { local = null; }
+    try { remote = JSON.parse(remoteRaw); } catch (e) { remote = null; }
+    const merged = Object.assign({}, (remote && typeof remote === 'object') ? remote : {}, (local && typeof local === 'object') ? local : {});
+    return JSON.stringify(merged);
+  }
+
   initCloudSync({
     appKey: 'finance',
-    syncedKeys: ['subs', 'wishlist', 'incoming_orders', 'nw_currency', 'nw:activity', 'nw:history'],
+    syncedKeys: ['subs', 'wishlist', 'incoming_orders', 'incoming_orders_deleted', 'nw_currency', 'nw:activity', 'nw:history'],
     syncedPrefixes: ['nw:'],
+    mergeFns: { incoming_orders: mergeOrdersState, incoming_orders_deleted: mergeDeletedOrderIds },
     onApplied: function () {
       window.dispatchEvent(new Event('storage'));
     }

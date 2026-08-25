@@ -3444,9 +3444,15 @@ document.addEventListener('DOMContentLoaded', function () {
     return Math.round(hrs / 24) + 'd ago';
   }
 
+  // Fixed to the stable production domain (not window.location.origin) —
+  // Vercel preview-deployment URLs change on every push and can never all
+  // be pre-registered in Google's console, so the OAuth round-trip always
+  // goes through this one fixed domain regardless of which URL you're
+  // actually browsing the app from.
+  const GMAIL_OAUTH_ORIGIN = 'https://mindenis-v2-2.vercel.app';
   function gmailAuthUrl() {
     const clientId = window.DASH_GMAIL_CLIENT_ID || '';
-    const redirectUri = window.location.origin + '/api/gmail-callback';
+    const redirectUri = GMAIL_OAUTH_ORIGIN + '/api/gmail-callback';
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,

@@ -21,8 +21,13 @@
 // ============================================================
 
 const MIN_SCAN_INTERVAL_MINUTES = 10;
-const MAX_MESSAGES_PER_RUN = 15;
-const SEARCH_QUERY = '(shipped OR shipping OR "tracking number" OR "your order" OR "order confirmed" OR "order confirmation" OR dispatched OR "out for delivery" OR delivery) newer_than:21d -in:spam -in:trash';
+const MAX_MESSAGES_PER_RUN = 25;
+// Standalone "shipping"/"delivery" match way too much retail marketing
+// ("free shipping this weekend!") and flood out real order confirmations
+// within the message cap — using more specific phrases plus excluding the
+// Promotions category (where most of that marketing actually lands) cuts
+// the noise substantially.
+const SEARCH_QUERY = '(shipped OR "has shipped" OR "tracking number" OR "your order" OR "order confirmed" OR "order confirmation" OR dispatched OR "out for delivery") newer_than:21d -category:promotions -in:spam -in:trash';
 
 async function supaService(path, options) {
   const url = process.env.SUPABASE_URL;
@@ -134,7 +139,14 @@ export default async function handler(req, res) {
     if (!tokRows.length) return res.status(200).json({ ok: true, connected: false, note: 'Gmail not connected' });
     const { refresh_token: refreshToken, last_scanned_at: lastScannedAt } = tokRows[0];
 
-    if (lastScannedAt) {
+    // ?reset=1 clears the processed-message log and skips the throttle —
+    // an explicit manual debug action (e.g. re-checking messages against
+    // an improved search query), not something a background cron ever
+    // passes, so it's fine that this endpoint has no auth requirement.
+    const forceReset = req.query && req.query.reset === '1';
+    if (forceReset) {
+      await supaService('gmail_processed?message_id=not.is.null', { method: 'DELETE' }).catch(() => {});
+    } else if (lastScannedAt) {
       const minsSince = (Date.now() - new Date(lastScannedAt).getTime()) / 60000;
       if (minsSince < MIN_SCAN_INTERVAL_MINUTES) {
         return res.status(200).json({ ok: true, skipped: true, note: 'scanned ' + Math.round(minsSince) + ' min ago, minimum interval is ' + MIN_SCAN_INTERVAL_MINUTES + ' min' });

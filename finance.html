@@ -1921,7 +1921,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <label>Expected arrival</label>
       <input type="date" id="oeDate">
     </div>
-    <a class="ord-view-email-btn" id="oeViewEmail" href="#" style="display:none;">📧 View original email</a>
+    <!-- target=_blank is required here specifically because this app is used
+         as an iOS standalone home-screen app: a plain same-window nav to an
+         external origin stays trapped inside the app's own webview, since a
+         standalone app has no "open in browser" concept of its own. _blank
+         is what makes iOS hand the navigation off to Safari (from where a
+         Universal Link can then open the native Gmail app if installed). -->
+    <a class="ord-view-email-btn" id="oeViewEmail" href="#" target="_blank" rel="noopener" style="display:none;">📧 View original email</a>
     <div class="ord-edit-actions">
       <button class="ord-edit-btn delete" id="oeDelete" type="button">Delete</button>
       <button class="ord-edit-btn save" id="oeSave" type="button">Save</button>

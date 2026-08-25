@@ -1,0 +1,17 @@
+name: Gmail order scan
+
+on:
+  # Offset from the hour/20-min boundary for the same reason as the habit
+  # reminders cron — avoids the exact-mark pile-up that can cause GitHub's
+  # scheduler to delay or drop runs under load.
+  schedule:
+    - cron: "5-59/20 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Gmail order scan
+        run: |
+          curl -sf -X POST "https://mindenis-v2-2.vercel.app/api/scan-gmail-orders"

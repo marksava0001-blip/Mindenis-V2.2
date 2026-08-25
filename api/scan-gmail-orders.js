@@ -223,6 +223,7 @@ export default async function handler(req, res) {
             carrier: result.carrier || null,
             trackingNumber: result.trackingNumber || null,
             gmailMessageId: m.id,
+            emailSubject: subject || null,
           });
         }
       } catch (e) {

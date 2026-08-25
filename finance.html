@@ -3203,10 +3203,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     document.getElementById('oeDate').value = order.date || '';
     const emailBtn = document.getElementById('oeViewEmail');
     // Orders added before gmailMessageId existed as its own field can still
-    // recover it — it was always embedded in the order id (o_gmail_<msgId>).
+    // be recognized as gmail-sourced — it was always embedded in the order
+    // id (o_gmail_<msgId>). A Gmail *search* link (rather than trying to
+    // deep-link straight to the message by id, which Gmail's web client
+    // doesn't reliably support) is what actually lands on the right email.
     const gmailMsgId = order.gmailMessageId || (order.id && order.id.indexOf('o_gmail_') === 0 ? order.id.slice('o_gmail_'.length) : null);
-    if (gmailMsgId) {
-      emailBtn.href = 'https://mail.google.com/mail/u/0/#all/' + gmailMsgId;
+    const isGmailSourced = order.source === 'gmail' || !!gmailMsgId;
+    if (isGmailSourced) {
+      const searchTerm = order.emailSubject || order.name;
+      emailBtn.href = 'https://mail.google.com/mail/u/0/#search/' + encodeURIComponent(searchTerm);
       emailBtn.style.display = '';
     } else {
       emailBtn.style.display = 'none';

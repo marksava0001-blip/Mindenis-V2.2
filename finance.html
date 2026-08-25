@@ -3216,14 +3216,18 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     const gmailMsgId = order.gmailMessageId || (order.id && order.id.indexOf('o_gmail_') === 0 ? order.id.slice('o_gmail_'.length) : null);
     const isGmailSourced = order.source === 'gmail' || !!gmailMsgId;
     if (isGmailSourced) {
+      // Only quote for an exact-phrase match when we have the email's real
+      // subject line (captured at scan time going forward) — for orders
+      // added before that existed, the only fallback is order.name, which
+      // is Claude's own paraphrase, not literal email text, so quoting it
+      // guarantees zero matches. Search that one unquoted instead (Gmail's
+      // normal multi-word search is forgiving about word order).
+      const hasRealSubject = !!order.emailSubject;
       const searchTerm = order.emailSubject || order.name;
+      const query = hasRealSubject ? '"' + searchTerm.replace(/"/g, '') + '"' : searchTerm;
       // Gmail's #search/ fragment expects spaces as "+" (classic
-      // form-urlencoded), not the "%20" encodeURIComponent produces —
-      // with %20 it silently fails to parse the query and falls back to
-      // showing the inbox instead. Wrapping in quotes forces an exact
-      // phrase match, which also survives odd punctuation in the subject
-      // better than an unquoted multi-word search.
-      const query = '"' + searchTerm.replace(/"/g, '') + '"';
+      // form-urlencoded), not the "%20" encodeURIComponent produces — with
+      // %20 it silently fails to parse the query and falls back to the inbox.
       const encodedQuery = encodeURIComponent(query).replace(/%20/g, '+');
       emailBtn.href = 'https://mail.google.com/mail/u/0/#search/' + encodedQuery;
       emailBtn.style.display = '';

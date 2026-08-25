@@ -164,7 +164,7 @@ export default async function handler(req, res) {
     if (!listRes.ok) return res.status(500).json({ error: 'Gmail list failed: ' + (await listRes.text()) });
     const listJson = await listRes.json();
     const candidates = listJson.messages || [];
-    if (!candidates.length) return res.status(200).json({ ok: true, connected: true, scanned: 0, ordersAdded: 0 });
+    if (!candidates.length) return res.status(200).json({ ok: true, connected: true, candidatesFound: 0, scanned: 0, ordersAdded: 0 });
 
     // --- skip already-processed messages -----------------------------------
     const idsParam = candidates.map((m) => encodeURIComponent(m.id)).join(',');
@@ -174,6 +174,7 @@ export default async function handler(req, res) {
 
     const newOrders = [];
     let scannedCount = 0;
+    let classifiedAsOrderCount = 0;
 
     for (const m of toCheck) {
       scannedCount++;
@@ -191,6 +192,7 @@ export default async function handler(req, res) {
 
         const result = await claudeExtractOrder(subject, from, bodyText);
         if (result && result.isOrder) {
+          classifiedAsOrderCount++;
           const amountCHF = await chfAmount(typeof result.cost === 'number' ? result.cost : null, result.currency);
           newOrders.push({
             id: 'o_gmail_' + m.id,
@@ -238,7 +240,14 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, connected: true, scanned: scannedCount, ordersAdded: newOrders.length });
+    return res.status(200).json({
+      ok: true, connected: true,
+      candidatesFound: candidates.length,
+      alreadyProcessed: candidates.length - toCheck.length,
+      scanned: scannedCount,
+      classifiedAsOrder: classifiedAsOrderCount,
+      ordersAdded: newOrders.length,
+    });
   } catch (e) {
     return res.status(500).json({ error: e && e.message ? e.message : String(e) });
   }

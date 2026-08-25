@@ -790,6 +790,40 @@ html, body { scrollbar-width: none; -ms-overflow-style: none; }
 .ord-gmail-link { background: none; border: none; color: var(--text-tertiary); font-size: 11.5px; cursor: pointer; text-decoration: underline; padding: 4px; }
 .ord-gmail-link:hover { color: #FF8A8A; }
 
+.ord-edit-bg {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
+  align-items: center; justify-content: center; padding: 20px;
+}
+.ord-edit-bg.show { display: flex; }
+.ord-edit-modal {
+  width: 100%; max-width: 440px;
+  background: #101013; border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 18px; padding: 22px; max-height: 88vh; overflow-y: auto;
+}
+.ord-edit-modal h3 { margin: 0 0 16px; font-size: 17px; font-weight: 700; color: var(--text-primary); }
+.ord-edit-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.ord-edit-field label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); }
+.ord-edit-field input, .ord-edit-field select {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 9px; padding: 10px 12px; color: var(--text-primary);
+  font-family: inherit; font-size: 15px; outline: none;
+}
+.ord-edit-field input:focus, .ord-edit-field select:focus { border-color: rgba(110,231,183,0.40); }
+.ord-edit-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ord-view-email-btn {
+  width: 100%; margin-bottom: 14px; padding: 10px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 9px; color: var(--text-primary); font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+  text-decoration: none; box-sizing: border-box;
+}
+.ord-view-email-btn:hover { background: rgba(255,255,255,0.08); }
+.ord-edit-actions { display: flex; gap: 8px; margin-top: 4px; }
+.ord-edit-btn { flex: 1; padding: 11px; border-radius: 10px; border: none; cursor: pointer; font-family: inherit; font-size: 13.5px; font-weight: 700; }
+.ord-edit-btn.save { background: linear-gradient(180deg, #6EE7B7, #4ED4A0); color: #04201A; }
+.ord-edit-btn.delete { background: rgba(255,138,138,0.10); border: 1px solid rgba(255,138,138,0.25); color: #FF8A8A; }
+
 .ord-section-h {
   display: flex; justify-content: space-between; align-items: baseline;
   margin: 18px 4px 8px;
@@ -812,6 +846,7 @@ html, body { scrollbar-width: none; -ms-overflow-style: none; }
   margin-bottom: 8px;
   border-left: 3px solid var(--text-tertiary);
   transition: background 0.15s;
+  cursor: pointer;
 }
 .ord-card:hover { background: rgba(255,255,255,0.045); }
 .ord-card.cat-bank   { border-left-color: #7DD3FC; }
@@ -1846,6 +1881,51 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     <div class="ord-empty-icon">📦</div>
     <div class="ord-empty-title">Nothing on the way</div>
     <div class="ord-empty-sub">Log an order above. Pick the account it comes out of, the expected arrival date, and the dashboard will show what % of your net worth it costs.</div>
+  </div>
+</div>
+
+<!-- ===== Edit Order modal ===== -->
+<div class="ord-edit-bg" id="ordEditBg">
+  <div class="ord-edit-modal">
+    <h3>Edit Order</h3>
+    <div class="ord-edit-field">
+      <label>Item</label>
+      <input type="text" id="oeName">
+    </div>
+    <div class="ord-edit-row">
+      <div class="ord-edit-field">
+        <label>Cost</label>
+        <input type="number" step="0.01" id="oeCost">
+      </div>
+      <div class="ord-edit-field">
+        <label>Currency</label>
+        <select id="oeCurrency">
+          <option value="CHF">CHF</option>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="GBP">GBP</option>
+        </select>
+      </div>
+    </div>
+    <div class="ord-edit-row">
+      <div class="ord-edit-field">
+        <label>Carrier</label>
+        <input type="text" id="oeCarrier" placeholder="e.g. GLS, UPS, DHL">
+      </div>
+      <div class="ord-edit-field">
+        <label>Tracking #</label>
+        <input type="text" id="oeTracking">
+      </div>
+    </div>
+    <div class="ord-edit-field">
+      <label>Expected arrival</label>
+      <input type="date" id="oeDate">
+    </div>
+    <a class="ord-view-email-btn" id="oeViewEmail" href="#" target="_blank" rel="noopener" style="display:none;">📧 View original email</a>
+    <div class="ord-edit-actions">
+      <button class="ord-edit-btn delete" id="oeDelete" type="button">Delete</button>
+      <button class="ord-edit-btn save" id="oeSave" type="button">Save</button>
+    </div>
   </div>
 </div>
 
@@ -3082,6 +3162,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         +   arrHtml
         + '</div>'
         + footHtml;
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return; // let delete/deduct/undo handle their own clicks
+        openOrderEdit(o.id);
+      });
       list.appendChild(row);
     });
     // Wire up delete (×), deduct, and undo buttons.
@@ -3100,6 +3184,75 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       b.addEventListener('click', () => undoDeduct(b.dataset.undoId));
     });
   }
+
+  // ============================================================
+  // EDIT ORDER — tap anywhere on a card (that isn't one of its own
+  // buttons) to open a modal with every field editable, plus a link
+  // back to the source email for orders Gmail auto-tracking found.
+  // ============================================================
+  let editingOrderId = null;
+  function openOrderEdit(id) {
+    const order = (storeGet('incoming_orders') || []).find(x => x.id === id);
+    if (!order) return;
+    editingOrderId = id;
+    document.getElementById('oeName').value = order.name || '';
+    document.getElementById('oeCost').value = order.entered_amount != null ? order.entered_amount : (order.amount || '');
+    document.getElementById('oeCurrency').value = order.entered_currency || 'CHF';
+    document.getElementById('oeCarrier').value = order.carrier || '';
+    document.getElementById('oeTracking').value = order.trackingNumber || '';
+    document.getElementById('oeDate').value = order.date || '';
+    const emailBtn = document.getElementById('oeViewEmail');
+    // Orders added before gmailMessageId existed as its own field can still
+    // recover it — it was always embedded in the order id (o_gmail_<msgId>).
+    const gmailMsgId = order.gmailMessageId || (order.id && order.id.indexOf('o_gmail_') === 0 ? order.id.slice('o_gmail_'.length) : null);
+    if (gmailMsgId) {
+      emailBtn.href = 'https://mail.google.com/mail/u/0/#all/' + gmailMsgId;
+      emailBtn.style.display = '';
+    } else {
+      emailBtn.style.display = 'none';
+    }
+    document.getElementById('ordEditBg').classList.add('show');
+  }
+  function closeOrderEdit() {
+    document.getElementById('ordEditBg').classList.remove('show');
+    editingOrderId = null;
+  }
+  document.getElementById('ordEditBg').addEventListener('click', (e) => {
+    if (e.target.id === 'ordEditBg') closeOrderEdit();
+  });
+  document.getElementById('oeSave').addEventListener('click', () => {
+    if (!editingOrderId) return;
+    const arr = storeGet('incoming_orders') || [];
+    const idx = arr.findIndex(x => x.id === editingOrderId);
+    if (idx < 0) return;
+    const name = document.getElementById('oeName').value.trim();
+    if (!name) { document.getElementById('oeName').focus(); return; }
+    const ccy = document.getElementById('oeCurrency').value;
+    const rate = exchangeRates[ccy] || 1;
+    const enteredAmount = parseFloat(document.getElementById('oeCost').value) || 0;
+    arr[idx] = {
+      ...arr[idx],
+      name,
+      entered_amount: enteredAmount,
+      entered_currency: ccy,
+      amount: enteredAmount / rate,
+      carrier: document.getElementById('oeCarrier').value.trim() || null,
+      trackingNumber: document.getElementById('oeTracking').value.trim() || null,
+      date: document.getElementById('oeDate').value || null,
+    };
+    storeSet('incoming_orders', arr);
+    closeOrderEdit();
+    renderAllNetWorth();
+  });
+  document.getElementById('oeDelete').addEventListener('click', () => {
+    if (!editingOrderId) return;
+    if (!confirm('Delete this order?')) return;
+    const arr = (storeGet('incoming_orders') || []).filter(x => x.id !== editingOrderId);
+    storeSet('incoming_orders', arr);
+    closeOrderEdit();
+    renderAllNetWorth();
+  });
+
   // ============================================================
   // DEDUCT — open the inline chooser of NW accounts. Picking one
   // subtracts the order amount from that account (in CHF), logs the

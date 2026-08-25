@@ -222,6 +222,7 @@ export default async function handler(req, res) {
             source: 'gmail',
             carrier: result.carrier || null,
             trackingNumber: result.trackingNumber || null,
+            gmailMessageId: m.id,
           });
         }
       } catch (e) {

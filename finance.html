@@ -3730,22 +3730,36 @@ document.addEventListener('DOMContentLoaded', function () {
   function renderConnected(body, status) {
     body.innerHTML =
       '<div class="ord-gmail-text">Connected · last scanned ' + timeAgo(status.lastScannedAt) + '<br>' +
-        '<button class="ord-gmail-link" id="ordGmailDisconnect" type="button">Disconnect</button></div>' +
+        '<button class="ord-gmail-link" id="ordGmailDisconnect" type="button">Disconnect</button>' +
+        ' · <button class="ord-gmail-link" id="ordGmailFullRescan" type="button">Full rescan</button></div>' +
       '<div class="ord-gmail-actions"><button class="ord-gmail-btn secondary" id="ordGmailScan" type="button">Scan now</button></div>';
-    $('ordGmailScan').addEventListener('click', async function () {
+
+    async function runScan(reset) {
       const btn = $('ordGmailScan');
+      const rescanBtn = $('ordGmailFullRescan');
       btn.disabled = true; btn.textContent = 'Scanning…';
+      if (rescanBtn) rescanBtn.disabled = true;
       try {
-        const r = await fetch('/api/scan-gmail-orders', { method: 'POST' });
+        const r = await fetch('/api/scan-gmail-orders' + (reset ? '?reset=1' : ''), { method: 'POST' });
         const j = await r.json();
         if (j.skipped) alert('Scanned recently — ' + j.note);
         else if (j.error) alert('Scan failed: ' + j.error);
-        else alert('Scanned ' + (j.scanned || 0) + ' new emails, added ' + (j.ordersAdded || 0) + ' order(s).');
+        else alert('Scanned ' + (j.scanned || 0) + ' emails, added ' + (j.ordersAdded || 0) + ' order(s).');
       } catch (e) {
         alert('Scan failed: ' + e.message);
       } finally {
         loadGmailStatus();
       }
+    }
+    $('ordGmailScan').addEventListener('click', function () { runScan(false); });
+    // Normal "Scan now" only looks at emails it hasn't checked before, and
+    // won't re-add something you deleted (its source email is still marked
+    // as already-checked). Full rescan forgets that history and re-checks
+    // everything in the search window from scratch — e.g. after cleaning
+    // up test/junk orders and wanting a clean re-run.
+    $('ordGmailFullRescan').addEventListener('click', function () {
+      if (!confirm("Re-check every recent matching email from scratch, ignoring what's already been scanned? This can re-add orders you previously deleted, if their source email still looks like a real order.")) return;
+      runScan(true);
     });
     $('ordGmailDisconnect').addEventListener('click', async function () {
       if (!confirm('Disconnect Gmail auto-tracking?')) return;

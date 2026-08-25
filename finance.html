@@ -3251,7 +3251,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       // normal multi-word search is forgiving about word order).
       const hasRealSubject = !!order.emailSubject;
       const searchTerm = order.emailSubject || order.name;
-      const query = hasRealSubject ? '"' + searchTerm.replace(/"/g, '') + '"' : searchTerm;
+      let query;
+      if (order.emailMessageIdHeader) {
+        // The precise path: rfc822msgid: matches the email's globally
+        // unique Message-ID header, so this reliably opens the exact
+        // original email rather than "something similar." Only available
+        // for orders scanned after this field started being captured.
+        query = 'rfc822msgid:' + order.emailMessageIdHeader;
+      } else {
+        query = hasRealSubject ? '"' + searchTerm.replace(/"/g, '') + '"' : searchTerm;
+      }
       // Gmail's #search/ fragment expects spaces as "+" (classic
       // form-urlencoded), not the "%20" encodeURIComponent produces — with
       // %20 it silently fails to parse the query and falls back to the inbox.

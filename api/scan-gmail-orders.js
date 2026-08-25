@@ -199,6 +199,12 @@ export default async function handler(req, res) {
         const headers = (msg.payload && msg.payload.headers) || [];
         const subject = (headers.find((h) => h.name === 'Subject') || {}).value || '';
         const from = (headers.find((h) => h.name === 'From') || {}).value || '';
+        // The globally-unique RFC 5322 Message-ID header (distinct from the
+        // Gmail API's own internal message id) — Gmail's rfc822msgid:
+        // search operator matches on this and reliably returns exactly one
+        // result: the original email, not just something similar.
+        const rawMessageIdHeader = (headers.find((h) => h.name.toLowerCase() === 'message-id') || {}).value || '';
+        const messageIdHeader = rawMessageIdHeader.replace(/^</, '').replace(/>$/, '');
         let bodyText = extractPlainText(msg.payload);
         if (!bodyText) bodyText = msg.snippet || '';
 
@@ -224,6 +230,7 @@ export default async function handler(req, res) {
             trackingNumber: result.trackingNumber || null,
             gmailMessageId: m.id,
             emailSubject: subject || null,
+            emailMessageIdHeader: messageIdHeader || null,
           });
         }
       } catch (e) {

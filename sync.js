@@ -277,5 +277,15 @@
     window.addEventListener('storage', (e) => {
       if (e.key && matches(e.key)) schedulePush();
     });
+    // A change made while offline fails its push silently, and nothing
+    // else here retries it — pullLatest() only runs on its own timer/focus/
+    // visibility triggers, and pushNow() has no retry loop of its own. The
+    // browser's 'online' event fires exactly when it's actually worth
+    // trying again: push whatever changed locally while offline, and pull
+    // to reconcile anything that changed remotely in the meantime.
+    window.addEventListener('online', function () {
+      schedulePush();
+      pullLatest(false);
+    });
   };
 })();

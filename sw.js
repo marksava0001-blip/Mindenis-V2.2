@@ -8,7 +8,37 @@
 
 const CACHE_NAME = 'dash-cache-v1';
 
-self.addEventListener('install', () => { self.skipWaiting(); });
+// Every page actually reachable from the hub, plus the shared assets they
+// all load. Precached on install so the whole app is available offline
+// right after the first open, instead of only building up coverage one
+// visited page at a time. (avatar-lab.html and template.html are excluded
+// deliberately — neither is linked from the hub; they're not part of the
+// real app.)
+const PRECACHE_URLS = [
+  '/', '/index.html', '/main.html', '/gym.html', '/health.html', '/po-water.html',
+  '/finance.html', '/caffeine.html', '/nova-lite.html', '/habits.html',
+  '/sync.js', '/topbar.js', '/manifest.json',
+];
+
+async function precacheAll() {
+  const cache = await caches.open(CACHE_NAME);
+  await Promise.all(PRECACHE_URLS.map(async (url) => {
+    try {
+      // cache: 'reload' skips the browser's own HTTP cache so this always
+      // grabs the current deployment, not a stale disk-cached copy.
+      const res = await fetch(url, { cache: 'reload' });
+      if (res && res.ok) await cache.put(url, res);
+    } catch (e) {
+      // One page failing (offline mid-install, a page briefly down) must
+      // not abort caching the rest — unlike cache.addAll(), which is
+      // all-or-nothing.
+    }
+  }));
+}
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(precacheAll().then(() => self.skipWaiting()));
+});
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([

@@ -387,8 +387,20 @@ body.topbar-modal-open {
     sync();
   }
 
+  // -------- Offline support --------
+  // Registering here (rather than only from habits.html's push-notification
+  // code) means every page gets the service worker installed on first
+  // visit, regardless of whether push notifications are ever turned on —
+  // that's what actually makes the app work offline. Registration is a
+  // safe no-op if it's already registered from elsewhere.
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+
   // -------- Boot --------
   function boot() {
+    registerServiceWorker();
     injectStyleAndHTML();
     const btn = document.getElementById('topbarWaterAdd');
     if (btn) btn.addEventListener('click', (e) => { e.preventDefault(); addWater(); });
